@@ -1,0 +1,15 @@
+@import './variables.css';
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: var(--paget-font-family);
+  font-size: var(--paget-font-size-md);
+  color: var(--paget-text);
+  background: var(--paget-bg);
+  -webkit-font-smoothing: antialiased;
+}

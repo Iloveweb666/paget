@@ -1,0 +1,64 @@
+:root {
+  /* 品牌色 / Brand colors — 匹配设计稿 */
+  --paget-primary: #6C5CE7;
+  --paget-primary-hover: #5A4BD6;
+  --paget-primary-light: #F5F3FF;
+  --paget-primary-dark: #312E81;
+
+  /* 语义色 / Semantic colors */
+  --paget-success: #22c55e;
+  --paget-warning: #f59e0b;
+  --paget-error: #ef4444;
+  --paget-error-light: #FEE2E2;
+  --paget-info: #3b82f6;
+
+  /* 中性色 / Neutral palette */
+  --paget-bg: #ffffff;
+  --paget-bg-secondary: #f9fafb;
+  --paget-bg-tertiary: #f3f4f6;
+  --paget-border: #e5e7eb;
+  --paget-border-light: #f3f4f6;
+
+  /* 文本色 / Text colors */
+  --paget-text: #111827;
+  --paget-text-secondary: #6b7280;
+  --paget-text-tertiary: #9ca3af;
+  --paget-text-inverse: #ffffff;
+
+  /* 间距 / Spacing */
+  --paget-space-xs: 4px;
+  --paget-space-sm: 8px;
+  --paget-space-md: 12px;
+  --paget-space-lg: 16px;
+  --paget-space-xl: 24px;
+
+  /* 圆角 / Border radius */
+  --paget-radius-sm: 6px;
+  --paget-radius-md: 8px;
+  --paget-radius-lg: 12px;
+  --paget-radius-xl: 16px;
+  --paget-radius-full: 9999px;
+
+  /* 阴影 / Shadows — 匹配设计稿 */
+  --paget-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --paget-shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+  --paget-shadow-lg: 0 8px 30px rgba(0, 0, 0, 0.08);
+  --paget-shadow-fab: 0 4px 16px rgba(49, 46, 129, 0.19);
+
+  /* 字体 / Typography */
+  --paget-font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  --paget-font-size-xs: 11px;
+  --paget-font-size-sm: 12px;
+  --paget-font-size-md: 14px;
+  --paget-font-size-lg: 16px;
+  --paget-font-size-xl: 18px;
+
+  /* 对话面板尺寸 / Chat panel dimensions */
+  --paget-panel-width: 400px;
+  --paget-panel-height: 640px;
+  --paget-fab-size: 56px;
+
+  /* 过渡 / Transitions */
+  --paget-transition-fast: 150ms ease;
+  --paget-transition-normal: 250ms ease;
+}

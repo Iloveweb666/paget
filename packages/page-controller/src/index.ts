@@ -1,0 +1,7 @@
+export { PageController } from './PageController'
+export type { BrowserState, PageControllerConfig } from './PageController'
+export { clickElement, inputText, selectOption, scrollVertically, scrollHorizontally, executeAction, executeBatch } from './actions'
+export { getFlatTree, flatTreeToString, getSelectorMap } from './dom'
+export type { FlatDomNode, InteractiveElementDomNode, TextDomNode, DomRect, DomExtractionConfig } from './dom'
+export { SimulatorMask } from './mask/SimulatorMask'
+export * from './patches'

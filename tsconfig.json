@@ -1,0 +1,9 @@
+{
+  "files": [],
+  "references": [
+    { "path": "packages/shared" },
+    { "path": "packages/page-controller" },
+    { "path": "packages/ui" },
+    { "path": "packages/server" }
+  ]
+}
