@@ -1,2 +1,2 @@
-export * from './status'
-export * from './events'
+export * from './status.js'
+export * from './events.js'

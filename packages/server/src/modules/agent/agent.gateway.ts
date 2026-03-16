@@ -17,9 +17,12 @@ import {
 } from '@nestjs/websockets';
 import { Logger } from '@nestjs/common';
 import { Server, Socket } from 'socket.io';
+import { v4 as uuidv4 } from 'uuid';
+import { WS_EVENTS } from '@paget/shared';
 import { AgentService } from './agent.service';
+import { classifyIntent } from './chain/intent-classifier';
 
-@WebSocketGateway({ cors: { origin: '*' } })
+@WebSocketGateway({ namespace: '/agent', cors: { origin: '*' } })
 export class AgentGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()
   server!: Server;
@@ -36,6 +39,12 @@ export class AgentGateway implements OnGatewayConnection, OnGatewayDisconnect {
   private pageStateResolvers = new Map<string, (state: any) => void>();
   private batchResultResolvers = new Map<string, (results: any) => void>();
 
+  /**
+   * Socket ID → Session ID 映射，用于断连时清理运行中的任务
+   * Socket ID → Session ID mapping for cleaning up running tasks on disconnect
+   */
+  private clientSessionMap = new Map<string, string>();
+
   constructor(private readonly agentService: AgentService) {}
 
   // 客户端连接时记录日志 / Log when a client connects
@@ -43,12 +52,24 @@ export class AgentGateway implements OnGatewayConnection, OnGatewayDisconnect {
     this.logger.log(`Client connected: ${client.id}`);
   }
 
-  // 客户端断开时记录日志 / Log when a client disconnects
+  // 客户端断开时清理运行中的任务和等待中的 resolver / Clean up running tasks and pending resolvers on disconnect
   handleDisconnect(client: Socket) {
     this.logger.log(`Client disconnected: ${client.id}`);
+
+    // 查找该客户端关联的 sessionId / Find sessionId associated with this client
+    const sessionId = this.clientSessionMap.get(client.id);
+    if (sessionId) {
+      // 取消运行中的任务 / Cancel running task
+      this.agentService.cancel(sessionId);
+      // 清理等待中的 resolver（让服务端 Promise 超时或拒绝）/ Clean up pending resolvers
+      this.pageStateResolvers.delete(sessionId);
+      this.batchResultResolvers.delete(sessionId);
+      this.clientSessionMap.delete(client.id);
+      this.logger.log(`Cleaned up session ${sessionId} for disconnected client ${client.id}`);
+    }
   }
 
-  // 处理任务提交事件 — 启动智能体循环 / Handle task submission event — start the agent loop
+  // 处理任务提交事件 — 意图分类后分发到对话或自动化 / Handle task submission — classify intent then dispatch to chat or automation
   @SubscribeMessage('task:submit')
   async handleTaskSubmit(
     @ConnectedSocket() client: Socket,
@@ -56,29 +77,86 @@ export class AgentGateway implements OnGatewayConnection, OnGatewayDisconnect {
   ) {
     const { task, sessionId, llmConfigId } = data;
 
+    // 记录 socket → session 映射，用于断连清理 / Track socket → session mapping for disconnect cleanup
+    this.clientSessionMap.set(client.id, sessionId);
+
     // 检查是否已有任务在运行 / Check if a task is already running
     if (this.agentService.isRunning(sessionId)) {
-      client.emit('agent:status', { status: 'error', message: 'Task already running' });
+      client.emit(WS_EVENTS.AGENT_STATUS, { status: 'error', message: 'Task already running' });
       return;
     }
 
-    // 启动智能体主循环 / Run the agent loop
-    await this.agentService.run({
-      sessionId,
-      task,
-      llmConfigId,
-      getPageState: () => this.requestPageState(client, sessionId),
-      executeBatchActions: (actions) => this.requestBatchActions(client, sessionId, actions),
-      emitStatus: (status, message?) => {
-        client.emit('agent:status', { status, sessionId, message });
-      },
-      emitHistory: (event) => {
-        client.emit('agent:history', event);
-      },
-      emitActivity: (activity) => {
-        client.emit('agent:activity', activity);
-      },
-    });
+    // 意图分类 / Intent classification
+    try {
+      const model = await this.agentService.getLLMModel();
+      const intent = await classifyIntent(model, task);
+      this.logger.log(`Intent classified: "${task}" → ${intent}`);
+
+      if (intent === 'chat') {
+        // 对话意图 → 流式回复 / Chat intent → streaming reply
+        const messageId = uuidv4();
+        client.emit(WS_EVENTS.AGENT_STATUS, { status: 'streaming', sessionId });
+
+        await this.agentService.chat(sessionId, task, {
+          onChunk: (chunk) => {
+            client.emit(WS_EVENTS.AGENT_STREAM, {
+              sessionId,
+              messageId,
+              chunk,
+              done: false,
+            });
+          },
+          onDone: () => {
+            client.emit(WS_EVENTS.AGENT_STREAM, {
+              sessionId,
+              messageId,
+              chunk: '',
+              done: true,
+            });
+            client.emit(WS_EVENTS.AGENT_STATUS, { status: 'idle', sessionId });
+          },
+          onError: (error) => {
+            client.emit(WS_EVENTS.AGENT_STREAM, {
+              sessionId,
+              messageId,
+              chunk: '',
+              done: true,
+            });
+            client.emit(WS_EVENTS.AGENT_STATUS, {
+              status: 'error',
+              sessionId,
+              message: error.message,
+            });
+          },
+        });
+        return;
+      }
+
+      // 自动化意图 → 走现有 agent 循环 / Automation intent → existing agent loop
+      await this.agentService.run({
+        sessionId,
+        task,
+        llmConfigId,
+        getPageState: () => this.requestPageState(client, sessionId),
+        executeBatchActions: (actions) => this.requestBatchActions(client, sessionId, actions),
+        emitStatus: (status, message?) => {
+          client.emit(WS_EVENTS.AGENT_STATUS, { status, sessionId, message });
+        },
+        emitHistory: (event) => {
+          client.emit(WS_EVENTS.AGENT_HISTORY, event);
+        },
+        emitActivity: (activity) => {
+          client.emit(WS_EVENTS.AGENT_ACTIVITY, activity);
+        },
+      });
+    } catch (err) {
+      this.logger.error(`Task handling error for session ${sessionId}:`, err);
+      client.emit(WS_EVENTS.AGENT_STATUS, {
+        status: 'error',
+        sessionId,
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
   }
 
   // 处理任务取消事件 — 中止运行中的任务 / Handle task cancel event — abort the running task

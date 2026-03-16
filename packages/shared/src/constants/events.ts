@@ -22,13 +22,13 @@ export const WS_EVENTS = {
   AGENT_HISTORY: 'agent:history',
   // 服务端 → 客户端：瞬态活动反馈 / Server → Client: transient activity
   AGENT_ACTIVITY: 'agent:activity',
-  // TODO: LLM 流式文本输出 / LLM streaming text output
+  // LLM 流式文本输出 / LLM streaming text output
   // 当用户进行纯对话（如咨询页面业务逻辑、查阅操作手册）而非页面自动化时，
   // LLM 应以流式方式返回文本，实现逐字渲染效果。
   // When the user engages in pure conversation (e.g. asking about page business logic,
   // consulting operation manuals) rather than page automation, the LLM should stream
   // text back for incremental rendering.
-  // AGENT_STREAM: 'agent:stream',
+  AGENT_STREAM: 'agent:stream',
   // 服务端 → 客户端：页面操作指令 / Server → Client: page action command
   PAGE_ACTION: 'page:action',
   // 客户端 → 服务端：页面状态上报 / Client → Server: page state report

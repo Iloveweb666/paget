@@ -1,6 +1,6 @@
 /**
- * 响应转换拦截器 — 将所有成功响应包装为统一格式 { code, data, message }
- * Response transform interceptor — wraps all successful responses into unified format { code, data, message }
+ * 响应转换拦截器 — 将所有成功响应包装为统一格式
+ * Response transform interceptor — wraps all successful responses into unified format
  */
 import {
   Injectable,
@@ -9,30 +9,33 @@ import {
   CallHandler,
 } from '@nestjs/common';
 import { Observable, map } from 'rxjs';
+import { BusinessCode } from '../constants/business-code';
 
 /**
- * 统一响应包装接口
- * Unified response wrapper interface
+ * 统一响应结构（成功和失败共用）
+ * Unified response structure (shared by success and error)
  */
-export interface ResponseWrapper<T> {
-  code: number;     // 业务状态码（0 表示成功） / Business status code (0 means success)
-  data: T;          // 响应数据 / Response data
-  message: string;  // 响应消息 / Response message
+export interface UnifiedResponse<T = unknown> {
+  success: boolean;
+  data: T | null;
+  code: number;
+  message: string;
 }
 
 @Injectable()
 export class TransformInterceptor<T>
-  implements NestInterceptor<T, ResponseWrapper<T>>
+  implements NestInterceptor<T, UnifiedResponse<T>>
 {
   intercept(
     context: ExecutionContext,
     next: CallHandler,
-  ): Observable<ResponseWrapper<T>> {
-    // 将原始响应数据包装为统一格式 / Wrap original response data into unified format
+  ): Observable<UnifiedResponse<T>> {
+    // 将原始响应数据包装为统一成功格式 / Wrap original response data into unified success format
     return next.handle().pipe(
       map((data) => ({
-        code: 0,
+        success: true,
         data,
+        code: BusinessCode.SUCCESS,
         message: 'success',
       })),
     );

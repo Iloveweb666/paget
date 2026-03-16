@@ -12,6 +12,7 @@ export default {
   status: {
     idle: '就绪',
     running: '执行中',
+    streaming: '正在回复...',
     completed: '已完成',
     error: '出错',
   },
@@ -37,6 +38,15 @@ export default {
     maxSteps: '最大步数',
     language: '语言',
     save: '保存',
+  },
+  wsLog: {
+    title: 'WS 日志',
+    clear: '清空',
+    export: '导出 JSON',
+    refresh: '刷新',
+    close: '关闭',
+    empty: '暂无日志',
+    tooltip: 'WebSocket 日志',
   },
   settings: {
     title: '全局设置',

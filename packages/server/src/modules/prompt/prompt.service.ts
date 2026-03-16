@@ -1,48 +1,16 @@
 /**
- * 提示词服务 — 管理提示词模板的 CRUD 操作，并提供模板渲染功能
- * Prompt service — manages CRUD operations for prompt templates and provides template rendering
+ * 提示词服务 — 从本地 .md 文件加载系统提示词
+ * Prompt service — loads system prompt from local .md file
  */
-import { Injectable, NotFoundException } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
-import { PromptTemplateEntity } from './prompt.entity';
+import { Injectable, Logger } from '@nestjs/common';
+import { readFileSync } from 'fs';
+import { join } from 'path';
 
 @Injectable()
 export class PromptService {
-  constructor(
-    @InjectRepository(PromptTemplateEntity)
-    private readonly promptRepo: Repository<PromptTemplateEntity>,
-  ) {}
-
-  // 查询所有提示词模板，按更新时间降序 / Find all prompt templates, ordered by update time descending
-  async findAll(): Promise<PromptTemplateEntity[]> {
-    return this.promptRepo.find({ order: { updatedAt: 'DESC' } });
-  }
-
-  // 根据 ID 查询单个模板，不存在则抛出异常 / Find a single template by ID, throw if not found
-  async findOne(id: string): Promise<PromptTemplateEntity> {
-    const template = await this.promptRepo.findOneBy({ id });
-    if (!template) throw new NotFoundException(`Prompt template ${id} not found`);
-    return template;
-  }
-
-  // 根据类型查找当前激活的模板 / Find the active template by type
-  async findActiveByType(type: 'system' | 'instruction' | 'page'): Promise<PromptTemplateEntity | null> {
-    return this.promptRepo.findOneBy({ type, isActive: true });
-  }
-
-  // 创建新的提示词模板 / Create a new prompt template
-  async create(data: Partial<PromptTemplateEntity>): Promise<PromptTemplateEntity> {
-    const entity = this.promptRepo.create(data);
-    return this.promptRepo.save(entity);
-  }
-
-  // 更新指定 ID 的模板 / Update a template by ID
-  async update(id: string, data: Partial<PromptTemplateEntity>): Promise<PromptTemplateEntity> {
-    const template = await this.findOne(id);
-    Object.assign(template, data);
-    return this.promptRepo.save(template);
-  }
+  private readonly logger = new Logger(PromptService.name);
+  // 缓存加载的系统提示词 / Cached system prompt
+  private systemPromptCache: string | null = null;
 
   /**
    * 渲染模板 — 将 {{variable}} 占位符替换为实际值
@@ -55,28 +23,41 @@ export class PromptService {
   }
 
   /**
-   * 获取组装后的系统提示词（变量已填充）
-   * Get the assembled system prompt with variables filled in.
+   * 获取系统提示词（优先从 .md 文件加载，失败时使用内置默认值）
+   * Get system prompt (loads from .md file first, falls back to built-in default)
    */
   async getSystemPrompt(variables: Record<string, string> = {}): Promise<string> {
-    const template = await this.findActiveByType('system');
-    if (!template) {
-      // 无自定义模板时使用默认系统提示词 / Fall back to default system prompt when no custom template exists
+    if (!this.systemPromptCache) {
+      this.systemPromptCache = this.loadFromFile();
+    }
+    return Object.keys(variables).length > 0
+      ? this.render(this.systemPromptCache, variables)
+      : this.systemPromptCache;
+  }
+
+  /**
+   * 从文件加载系统提示词 / Load system prompt from file
+   */
+  private loadFromFile(): string {
+    try {
+      const filePath = join(__dirname, 'templates', 'system_prompt.md');
+      return readFileSync(filePath, 'utf-8');
+    } catch {
+      this.logger.warn('Failed to load system_prompt.md, using built-in default');
       return DEFAULT_SYSTEM_PROMPT;
     }
-    return this.render(template.content, variables);
   }
 }
 
-// 默认系统提示词 — 当数据库中无激活的系统模板时使用 / Default system prompt — used when no active system template exists in the database
+// 内置默认系统提示词 — 当 .md 文件不可用时使用 / Built-in default — used when .md file is unavailable
 const DEFAULT_SYSTEM_PROMPT = `You are a web page automation agent. You can interact with web page elements to complete tasks.
 
 ## Core Principles
 1. **Reflection-Before-Action**: Before every action, reflect on what happened previously, what you remember, and what your next goal is.
-2. **Batch Operations**: When multiple actions can be performed without needing to re-observe the page (e.g., filling multiple form fields), combine them into a single actions array.
+2. **Batch Operations**: When multiple actions can be performed without needing to re-observe the page, combine them into a single actions array.
 3. **Minimal Actions**: Use the fewest actions necessary. Only separate into different steps when you need to observe the page state after an action.
 
-## Available Tools
+## Available Actions
 - click(index): Click an element by its index
 - input(index, text): Input text into a field
 - select(index, value): Select a dropdown option

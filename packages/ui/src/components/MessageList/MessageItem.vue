@@ -12,6 +12,8 @@ import MarkdownRenderer from '../common/MarkdownRenderer.vue'
 
 const props = defineProps<{
   message: ChatMessage
+  /** 是否正在流式输出中 / Whether streaming is in progress */
+  isStreaming?: boolean
 }>()
 
 // 格式化时间 / Format timestamp
@@ -44,8 +46,9 @@ const timeStr = computed(() => {
     <div class="msg__bubble msg__bubble--ai">
       <div class="msg__content">
         <MarkdownRenderer :content="message.content" />
+        <span v-if="isStreaming" class="msg__cursor">|</span>
       </div>
-      <div v-if="timeStr" class="msg__time">{{ timeStr }}</div>
+      <div v-if="timeStr && !isStreaming" class="msg__time">{{ timeStr }}</div>
     </div>
   </div>
 
@@ -142,6 +145,19 @@ const timeStr = computed(() => {
 .msg__time--user {
   color: var(--paget-text-inverse);
   opacity: 0.6;
+}
+
+/* 流式光标动画 / Streaming cursor animation */
+.msg__cursor {
+  display: inline;
+  color: var(--paget-primary);
+  font-weight: bold;
+  animation: blink 0.8s step-end infinite;
+}
+
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
 }
 
 /* 系统消息 / System message */

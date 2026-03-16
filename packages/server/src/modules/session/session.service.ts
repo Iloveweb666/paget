@@ -1,59 +1,55 @@
 /**
- * 会话服务 — 管理智能体会话的创建、状态更新和历史记录追加
- * Session service — manages agent session creation, status updates, and history appending
+ * 会话服务 — 基于内存 Map 的会话状态管理（适用于单实例单次会话场景）
+ * Session service — in-memory Map-based session state management (for single-instance, single-session scenarios)
  */
 import { Injectable } from '@nestjs/common';
-import { InjectRepository } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
-import { SessionEntity } from './session.entity';
+
+/**
+ * 内存中的会话数据结构
+ * In-memory session data structure
+ */
+interface SessionData {
+  sessionId: string;
+  status: string;
+  currentTask: string | null;
+  history: Array<Record<string, unknown>>;
+  totalSteps: number;
+  createdAt: Date;
+}
 
 @Injectable()
 export class SessionService {
-  constructor(
-    @InjectRepository(SessionEntity)
-    private readonly sessionRepo: Repository<SessionEntity>,
-  ) {}
+  // 会话存储（键为 sessionId）/ Session store (keyed by sessionId)
+  private readonly sessions = new Map<string, SessionData>();
 
-  // 查询所有会话，按更新时间降序 / Find all sessions, ordered by update time descending
-  async findAll(): Promise<SessionEntity[]> {
-    return this.sessionRepo.find({ order: { updatedAt: 'DESC' } });
-  }
-
-  // 根据会话 ID 查找会话 / Find a session by session ID
-  async findBySessionId(sessionId: string): Promise<SessionEntity | null> {
-    return this.sessionRepo.findOneBy({ sessionId });
-  }
-
-  // 获取或创建会话（幂等操作） / Get or create a session (idempotent operation)
-  async getOrCreate(sessionId: string): Promise<SessionEntity> {
-    let session = await this.findBySessionId(sessionId);
+  // 获取或创建会话（幂等操作）/ Get or create a session (idempotent)
+  async getOrCreate(sessionId: string): Promise<SessionData> {
+    let session = this.sessions.get(sessionId);
     if (!session) {
-      // 会话不存在，创建新会话并初始化空历史记录 / Session doesn't exist, create new one with empty history
-      session = this.sessionRepo.create({ sessionId, history: [] });
-      session = await this.sessionRepo.save(session);
+      session = {
+        sessionId,
+        status: 'idle',
+        currentTask: null,
+        history: [],
+        totalSteps: 0,
+        createdAt: new Date(),
+      };
+      this.sessions.set(sessionId, session);
     }
     return session;
   }
 
-  // 更新会话状态，可选同时更新当前任务 / Update session status, optionally update current task
+  // 更新会话状态 / Update session status
   async updateStatus(sessionId: string, status: string, task?: string): Promise<void> {
-    await this.sessionRepo.update(
-      { sessionId },
-      { status, ...(task ? { currentTask: task } : {}) },
-    );
+    const session = await this.getOrCreate(sessionId);
+    session.status = status;
+    if (task !== undefined) session.currentTask = task;
   }
 
-  // 追加历史事件到会话记录，并更新步骤计数 / Append a history event to the session and update step count
+  // 追加历史事件 / Append a history event
   async appendHistory(sessionId: string, event: Record<string, unknown>): Promise<void> {
     const session = await this.getOrCreate(sessionId);
-    const history = session.history || [];
-    history.push(event);
-    await this.sessionRepo.update(
-      { sessionId },
-      {
-        history,
-        totalSteps: history.filter((e) => e.type === 'step').length, // 仅计算 step 类型事件 / Only count step-type events
-      },
-    );
+    session.history.push(event);
+    session.totalSteps = session.history.filter((e) => e.type === 'step').length;
   }
 }

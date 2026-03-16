@@ -21,8 +21,8 @@ async function bootstrap() {
   // 注册全局响应拦截器（统一成功响应格式） / Register global response interceptor (unified success response format)
   app.useGlobalInterceptors(new TransformInterceptor());
 
-  // 启用跨域 / Enable CORS
-  app.enableCors();
+  // 启用跨域（允许所有来源）/ Enable CORS (allow all origins)
+  app.enableCors({ origin: true, credentials: true });
 
   // 从配置服务中获取端口号，默认 3000 / Get the port from config service, default 3000
   const configService = app.get(ConfigService);

@@ -85,6 +85,9 @@ const expanded = ref(false)
   border-radius: var(--paget-radius-md);
   overflow: hidden;
   margin: 4px 0;
+  /* 防止在 flex 滚动容器中被压缩为 0 高度 / Prevent being squished to 0 height in flex scroll container */
+  flex-shrink: 0;
+  width: 100%;
 }
 
 .step-card__header {

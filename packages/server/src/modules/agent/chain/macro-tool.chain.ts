@@ -67,7 +67,8 @@ export function macroToolToOpenAIFunction(registry: ToolRegistry) {
       name: 'agent_step',
       description:
         'Execute one agent step: reflect on the previous goal, then perform one or more actions.',
-      parameters: zodToJsonSchema(schema), // Zod 模式转 JSON Schema / Convert Zod schema to JSON Schema
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- zod 与 zod-to-json-schema 版本间类型不兼容 / type incompatibility between zod and zod-to-json-schema versions
+      parameters: zodToJsonSchema(schema as any),
     },
   };
 }

@@ -4,6 +4,8 @@ export enum AgentStatus {
   IDLE = 'idle',
   // 正在执行任务 / Task is running
   RUNNING = 'running',
+  // 流式对话回复中（非自动化）/ Streaming chat reply (non-automation)
+  STREAMING = 'streaming',
   // 任务成功完成 / Task completed successfully
   COMPLETED = 'completed',
   // 任务执行出错 / Task execution error

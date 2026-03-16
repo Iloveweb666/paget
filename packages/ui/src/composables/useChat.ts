@@ -3,7 +3,7 @@
  * Manages chat message state and auto-scroll behavior
  */
 import { ref, nextTick } from 'vue'
-import type { ChatMessage } from '@paget/shared'
+import type { ChatMessage, StreamChunkPayload } from '@paget/shared'
 
 export function useChat() {
   // 消息列表 / Message list
@@ -58,27 +58,37 @@ export function useChat() {
     return msg
   }
 
-  // TODO: 处理 LLM 流式文本分片，实现逐字渲染 / Handle LLM streaming text chunks for typewriter rendering
-  // 当用户进行纯对话（如咨询页面业务逻辑、查阅嵌入的操作手册/资料）时，
-  // 需要将流式分片增量追加到同一条 assistant 消息中。
-  // When the user engages in pure conversation (e.g. asking about page business logic,
-  // consulting embedded manuals/documents), stream chunks should be appended
-  // incrementally to the same assistant message.
-  //
-  // function handleStreamChunk(payload: StreamChunkPayload) {
-  //   const existing = messages.value.find(m => m.id === payload.messageId)
-  //   if (existing) {
-  //     existing.content += payload.chunk
-  //   } else {
-  //     messages.value.push({
-  //       id: payload.messageId,
-  //       role: 'assistant',
-  //       content: payload.chunk,
-  //       timestamp: Date.now(),
-  //     })
-  //   }
-  //   if (payload.done || !existing) scrollToBottom()
-  // }
+  // 当前正在流式输出的消息 ID / Currently streaming message ID
+  const streamingMessageId = ref<string | null>(null)
+
+  /**
+   * 处理 LLM 流式文本分片，实现逐字渲染 / Handle LLM streaming text chunks for typewriter rendering
+   * 当用户进行纯对话时，将流式分片增量追加到同一条 assistant 消息中。
+   * When the user engages in pure conversation, stream chunks are appended
+   * incrementally to the same assistant message.
+   */
+  function handleStreamChunk(payload: StreamChunkPayload) {
+    const existing = messages.value.find(m => m.id === payload.messageId)
+    if (existing) {
+      existing.content += payload.chunk
+    } else {
+      messages.value.push({
+        id: payload.messageId,
+        role: 'assistant',
+        content: payload.chunk,
+        timestamp: Date.now(),
+      })
+    }
+
+    // 跟踪流式消息 ID / Track streaming message ID
+    if (payload.done) {
+      streamingMessageId.value = null
+    } else {
+      streamingMessageId.value = payload.messageId
+    }
+
+    if (payload.done || !existing) scrollToBottom()
+  }
 
   /**
    * 滚动消息列表到底部 / Scroll the message list to the bottom
@@ -113,9 +123,11 @@ export function useChat() {
     messages,
     inputText,
     messageListRef,
+    streamingMessageId,
     addUserMessage,
     addAssistantMessage,
     addSystemMessage,
+    handleStreamChunk,
     scrollToBottom,
     clearMessages,
     sendMessage,

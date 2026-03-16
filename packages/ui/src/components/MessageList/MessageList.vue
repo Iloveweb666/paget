@@ -11,12 +11,14 @@ import MessageItem from './MessageItem.vue'
 import StepCard from './StepCard.vue'
 import ActivityIndicator from './ActivityIndicator.vue'
 
-defineProps<{
+const props = defineProps<{
   messages: ChatMessage[]
   history: HistoryEvent[]
   activity: ActivityPayload | null
   /** Agent 是否正在运行（控制思考指示器）/ Whether agent is running */
   isRunning: boolean
+  /** 当前正在流式输出的消息 ID / Currently streaming message ID */
+  streamingMessageId?: string | null
 }>()
 
 // 列表 DOM 引用（用于父组件控制滚动）/ List DOM ref (for parent scroll control)
@@ -30,6 +32,7 @@ const listRef = defineModel<HTMLElement | null>('listRef')
       v-for="msg in messages"
       :key="msg.id"
       :message="msg"
+      :is-streaming="msg.id === props.streamingMessageId"
     />
 
     <!-- Agent 历史事件（步骤卡片、观察、错误）/ Agent history events -->
@@ -71,6 +74,11 @@ const listRef = defineModel<HTMLElement | null>('listRef')
 .message-list::-webkit-scrollbar-thumb {
   background: var(--paget-border);
   border-radius: 2px;
+}
+
+/* 防止所有子项在 flex 滚动容器中被压缩 / Prevent flex children from being squished in scroll container */
+.message-list > * {
+  flex-shrink: 0;
 }
 
 .message-list__observation {

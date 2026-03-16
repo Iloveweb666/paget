@@ -362,18 +362,18 @@ export class PageController extends EventTarget {
     this.assertIndexed()
 
     // 如果启用遮罩层则显示 / Show mask if enabled
-    if (this.enableMask && this.mask) this.mask.show()
+    if (this.enableMask && this.mask) {
+      this.mask.show()
+      // 高亮第一个操作的目标元素 / Highlight the first action's target element
+      this.highlightActionTarget(actions[0])
+    }
 
     const result = await executeBatch(actions, this.selectorMap, (i, r) => {
-      // 高亮下一个要操作的元素 / Highlight next element to operate on
+      // 当前操作完成后，高亮下一个要操作的目标元素 / After current action, highlight next action's target
       if (this.mask) {
         const nextAction = actions[i + 1]
         if (nextAction) {
-          const idx = nextAction.params.index as number | undefined
-          if (idx !== undefined) {
-            const el = this.selectorMap.get(idx)
-            if (el) this.mask.highlightElement(el)
-          }
+          this.highlightActionTarget(nextAction)
         }
       }
       onProgress?.(i, r)
@@ -382,6 +382,18 @@ export class PageController extends EventTarget {
     // 清除高亮 / Clear highlight
     this.mask?.clearHighlight()
     return result
+  }
+
+  /**
+   * 高亮指定操作的目标元素 / Highlight the target element of an action
+   */
+  private highlightActionTarget(action: AgentAction | undefined): void {
+    if (!action || !this.mask) return
+    const idx = action.params.index as number | undefined
+    if (idx !== undefined) {
+      const el = this.selectorMap.get(idx)
+      if (el) this.mask.highlightElement(el)
+    }
   }
 
   // ======= 遮罩层操作 / Mask Operations =======

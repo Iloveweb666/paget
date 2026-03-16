@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cd:*)",
+      "Bash(cd D:/adminWorkspace/paget && pnpm build:shared 2>&1)",
+      "Bash(cd D:/adminWorkspace/paget && pnpm install 2>&1)",
+      "Bash(head:*)",
+      "Bash(tasklist:*)",
+      "Bash(wmic process:*)",
+      "Bash(cd D:/adminWorkspace/paget/packages/server && npx nest build 2>&1)",
+      "Bash(echo done:*)",
+      "Bash(tail:*)"
+    ]
+  }
+}

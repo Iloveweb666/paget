@@ -90,7 +90,10 @@ function closeDialog() {
 </script>
 
 <template>
-  <!-- 悬浮按钮（对话框关闭时显示）/ FAB (shown when dialog is closed) -->
+  <!-- 路由页面内容 / Routed page content -->
+  <router-view />
+
+  <!-- 悬浮按钮（对话框关闭时显示，全局覆盖层）/ FAB (shown when dialog is closed, global overlay) -->
   <FloatingButton
     v-show="!dialogVisible"
     ref="fabRef"
@@ -98,14 +101,12 @@ function closeDialog() {
     @click="openDialog"
   />
 
-  <!-- 对话框 / Dialog -->
-  <Transition name="dialog">
-    <ChatPanel
-      v-if="dialogVisible"
-      :style="dialogStyle"
-      @close="closeDialog"
-    />
-  </Transition>
+  <!-- 对话框（v-show 保持实例存活，关闭再打开不丢失对话）/ Dialog (v-show keeps instance alive, preserves chat on reopen) -->
+  <ChatPanel
+    v-show="dialogVisible"
+    :style="dialogStyle"
+    @close="closeDialog"
+  />
 </template>
 
 <style scoped>

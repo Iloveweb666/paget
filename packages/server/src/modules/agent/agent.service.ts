@@ -3,11 +3,13 @@
  * Agent orchestration service — implements the core Observe-Think-Act loop with batch action support
  */
 import { Injectable, Logger } from '@nestjs/common';
+import { ChatOpenAI } from '@langchain/openai';
 import { LLMService } from '../llm/llm.service';
 import { PromptService } from '../prompt/prompt.service';
 import { SessionService } from '../session/session.service';
 import { ToolRegistry } from './tools/tool.registry';
-import { executeAgentStep, AgentChainOutput } from './chain/agent.chain';
+import { executeAgentStep, type AgentChainInput } from './chain/agent.chain';
+import { executeStreamingChat } from './chain/chat.chain';
 
 /**
  * 智能体运行上下文 — 包含会话信息和与客户端交互的回调函数
@@ -59,6 +61,8 @@ export class AgentService {
   private readonly logger = new Logger(AgentService.name);
   // 正在运行的任务映射表，键为 sessionId / Map of running tasks, keyed by sessionId
   private readonly runningTasks = new Map<string, { abort: () => void }>();
+  // 正在进行流式对话的会话集合 / Set of sessions with active streaming chat
+  private readonly streamingSessions = new Set<string>();
 
   constructor(
     private readonly llmService: LLMService,
@@ -68,11 +72,53 @@ export class AgentService {
   ) {}
 
   /**
-   * 检查指定会话是否有正在运行的任务
-   * Check if a session has a running task
+   * 检查指定会话是否有正在运行的任务（包括流式对话）
+   * Check if a session has a running task (including streaming chat)
    */
   isRunning(sessionId: string): boolean {
-    return this.runningTasks.has(sessionId);
+    return this.runningTasks.has(sessionId) || this.streamingSessions.has(sessionId);
+  }
+
+  /**
+   * 获取 LLM 模型实例（供 gateway 做意图分类等用途）
+   * Get LLM model instance (for gateway to do intent classification, etc.)
+   */
+  async getLLMModel(): Promise<ChatOpenAI> {
+    return this.llmService.getChatModel();
+  }
+
+  /**
+   * 执行流式对话（非自动化场景）
+   * Execute streaming chat (non-automation scenario)
+   */
+  async chat(
+    sessionId: string,
+    message: string,
+    callbacks: {
+      onChunk: (chunk: string) => void;
+      onDone: (fullText: string) => void;
+      onError: (error: Error) => void;
+    },
+  ): Promise<void> {
+    this.streamingSessions.add(sessionId);
+    const model = await this.llmService.getChatModel();
+
+    try {
+      await executeStreamingChat(model, message, {
+        onChunk: callbacks.onChunk,
+        onDone: (fullText) => {
+          this.streamingSessions.delete(sessionId);
+          callbacks.onDone(fullText);
+        },
+        onError: (error) => {
+          this.streamingSessions.delete(sessionId);
+          callbacks.onError(error);
+        },
+      });
+    } catch (err) {
+      this.streamingSessions.delete(sessionId);
+      throw err;
+    }
   }
 
   /**
@@ -115,11 +161,11 @@ export class AgentService {
     ctx.emitStatus('running');
 
     // 获取 LLM 模型实例和系统提示词 / Get LLM model instance and system prompt
-    const model = await this.llmService.getChatModel(ctx.llmConfigId);
+    const model = await this.llmService.getChatModel();
     const systemPrompt = await this.promptService.getSystemPrompt();
 
-    // 步骤历史记录 / Step history
-    const history: AgentChainOutput[] = [];
+    // 步骤历史记录（与 AgentChainInput.history 对齐）/ Step history (aligned with AgentChainInput.history)
+    const history: AgentChainInput['history'] = [];
     let stepNumber = 0;
 
     try {
@@ -170,7 +216,17 @@ export class AgentService {
           timestamp: Date.now(),
         };
 
-        history.push(stepOutput);
+        // 存入完整步骤记录（reflection + actions + results）供后续 LLM 上下文使用
+        // Push complete step record for subsequent LLM context
+        history.push({
+          reflection: {
+            evaluation_previous_goal: stepOutput.evaluation_previous_goal,
+            memory: stepOutput.memory,
+            next_goal: stepOutput.next_goal,
+          },
+          actions: stepOutput.actions,
+          results,
+        });
         await this.sessionService.appendHistory(sessionId, stepEvent);
         ctx.emitHistory(stepEvent);
 

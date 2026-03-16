@@ -8,7 +8,7 @@
  */
 import { t } from '@/i18n'
 
-const emit = defineEmits<{ close: [] }>()
+const emit = defineEmits<{ close: []; 'open-ws-log': [] }>()
 </script>
 
 <template>
@@ -22,12 +22,21 @@ const emit = defineEmits<{ close: [] }>()
       </svg>
       <span class="chat-header__title">{{ t('chat.title') }}</span>
     </div>
+    <div class="chat-header__right">
+    <!-- WS 日志按钮 / WS log button -->
+    <button class="chat-header__action" :title="t('wsLog.tooltip')" @click="emit('open-ws-log')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z" />
+        <path d="M14 2v6h6" /><path d="M16 13H8" /><path d="M16 17H8" /><path d="M10 9H8" />
+      </svg>
+    </button>
     <!-- 关闭按钮 / Close button -->
-    <button class="chat-header__close" @click="emit('close')">
+    <button class="chat-header__action" @click="emit('close')">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <path d="M18 6 6 18" /><path d="m6 6 12 12" />
       </svg>
     </button>
+    </div>
   </div>
 </template>
 
@@ -60,7 +69,13 @@ const emit = defineEmits<{ close: [] }>()
   color: var(--paget-text-inverse);
 }
 
-.chat-header__close {
+.chat-header__right {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.chat-header__action {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -75,11 +90,11 @@ const emit = defineEmits<{ close: [] }>()
   transition: opacity var(--paget-transition-fast);
 }
 
-.chat-header__close:hover {
+.chat-header__action:hover {
   opacity: 1;
 }
 
-.chat-header__close svg {
+.chat-header__action svg {
   width: 18px;
   height: 18px;
   color: var(--paget-text-inverse);

@@ -1,4 +1,4 @@
-import type { AgentStatus } from '../constants/status'
+import type { AgentStatus } from '../constants/status.js'
 
 /**
  * 单个原子操作，Agent 可执行的最小动作单元

@@ -12,6 +12,7 @@ export default {
   status: {
     idle: 'Ready',
     running: 'Running',
+    streaming: 'Responding...',
     completed: 'Completed',
     error: 'Error',
   },
@@ -37,6 +38,15 @@ export default {
     maxSteps: 'Max Steps',
     language: 'Language',
     save: 'Save',
+  },
+  wsLog: {
+    title: 'WS Logs',
+    clear: 'Clear',
+    export: 'Export JSON',
+    refresh: 'Refresh',
+    close: 'Close',
+    empty: 'No logs yet',
+    tooltip: 'WebSocket Logs',
   },
   settings: {
     title: 'Settings',

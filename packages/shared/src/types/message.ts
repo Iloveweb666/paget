@@ -12,19 +12,20 @@ export interface ChatMessage {
   timestamp: number
 }
 
-// TODO: LLM 流式文本分片载荷 / LLM streaming text chunk payload
-// 用于纯对话场景（如用户咨询页面业务逻辑、查阅嵌入的操作手册/资料），
-// LLM 以流式方式逐步返回文本，UI 侧增量追加到同一条 assistant 消息中实现逐字渲染。
-// For pure conversation scenarios (e.g. user inquiring about page business logic,
-// consulting embedded manuals/documents). The LLM streams text incrementally,
-// and the UI appends chunks to the same assistant message for typewriter rendering.
-//
-// export interface StreamChunkPayload {
-//   sessionId: string
-//   messageId: string   // 同一条消息的所有 chunk 共享此 ID / All chunks of the same message share this ID
-//   chunk: string       // 本次增量文本 / Incremental text for this chunk
-//   done: boolean       // 是否为最后一个 chunk / Whether this is the final chunk
-// }
+/**
+ * LLM 流式文本分片载荷 / LLM streaming text chunk payload
+ * 用于纯对话场景（如用户咨询页面业务逻辑、查阅嵌入的操作手册/资料），
+ * LLM 以流式方式逐步返回文本，UI 侧增量追加到同一条 assistant 消息中实现逐字渲染。
+ * For pure conversation scenarios (e.g. user inquiring about page business logic,
+ * consulting embedded manuals/documents). The LLM streams text incrementally,
+ * and the UI appends chunks to the same assistant message for typewriter rendering.
+ */
+export interface StreamChunkPayload {
+  sessionId: string
+  messageId: string   // 同一条消息的所有 chunk 共享此 ID / All chunks of the same message share this ID
+  chunk: string       // 本次增量文本 / Incremental text for this chunk
+  done: boolean       // 是否为最后一个 chunk / Whether this is the final chunk
+}
 
 /**
  * WebSocket 任务提交载荷
