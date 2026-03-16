@@ -17,5 +17,8 @@
   },
   "dependencies": {
     "@paget/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.3"
   }
 }

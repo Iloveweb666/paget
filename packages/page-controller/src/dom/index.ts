@@ -15,6 +15,24 @@ export interface DomExtractionConfig {
   interactiveSelector?: string
 }
 
+// TODO: 使用 MutationObserver 实现增量 DOM 扫描优化 / Incremental DOM scan via MutationObserver
+// 当前每次调用 getFlatTree 都全量遍历 DOM 树，对于 Element Plus 中后台页面（~3000-5000 节点）
+// 耗时约 30-80ms。Agent 循环中两次观察之间页面变化通常很小，可通过以下方案优化：
+// Currently getFlatTree does a full DOM traversal every call. For typical Element Plus admin
+// pages (~3000-5000 nodes), this takes ~30-80ms. Between Agent loop observations, page
+// changes are usually minimal. Optimization approach:
+//
+// 1. 初始化时注册 MutationObserver 监听 childList/attributes/subtree 变化
+//    Register MutationObserver on init to watch childList/attributes/subtree changes
+// 2. 维护脏子树根节点集合（dirtyRoots），mutation 回调中标记变化节点
+//    Maintain a dirtyRoots set, mark changed nodes in mutation callback
+// 3. getFlatTree 调用时，若无脏标记则直接返回缓存结果（<1ms）
+//    On getFlatTree call, return cached result if no dirty marks (<1ms)
+// 4. 若有脏标记，仅重新遍历脏子树并合并到缓存中（通常 2-5ms）
+//    If dirty, only re-traverse dirty subtrees and merge into cache (typically 2-5ms)
+// 5. 路由跳转等全量替换场景仍需全量扫描，此时无额外收益
+//    Full page replacement (route navigation) still requires full scan, no extra benefit
+
 /**
  * 从 DOM 中提取交互元素和文本节点的扁平树。
  * 每个交互元素会被分配一个索引编号，供 LLM 引用。

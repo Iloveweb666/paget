@@ -112,16 +112,18 @@ export function useWebSocket(url = '/') {
   // }
 
   /**
-   * 监听来自服务端的页面操作指令 / Listen for page action commands from server
+   * 监听来自服务端的页面操作指令（如 get_state）
+   * Listen for page action commands from server (e.g. get_state)
    */
-  function onPageAction(callback: (action: AgentAction) => void) {
+  function onPageAction(callback: (payload: { type: string; sessionId: string }) => void) {
     socket.value?.on(WS_EVENTS.PAGE_ACTION, callback)
   }
 
   /**
-   * 监听来自服务端的批量操作指令 / Listen for batch action commands from server
+   * 监听来自服务端的批量操作指令
+   * Listen for batch action commands from server
    */
-  function onBatchAction(callback: (actions: AgentAction[]) => void) {
+  function onBatchAction(callback: (payload: { sessionId: string; actions: AgentAction[] }) => void) {
     socket.value?.on(WS_EVENTS.PAGE_BATCH_ACTION, callback)
   }
 

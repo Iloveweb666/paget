@@ -85,6 +85,16 @@ export class SimulatorMask {
   }
 
   /**
+   * 设置遮罩层是否拦截指针事件（DOM 提取期间需要临时关闭）
+   * Set whether the overlay intercepts pointer events (disabled during DOM extraction)
+   */
+  setPointerEvents(enabled: boolean): void {
+    if (this.overlay) {
+      this.overlay.style.pointerEvents = enabled ? 'auto' : 'none'
+    }
+  }
+
+  /**
    * 遮罩层当前是否可见
    * Whether the mask is currently visible
    */

@@ -7,7 +7,8 @@
  * Integrates WebSocket, agent state, chat messages, and config
  */
 import { ref, onMounted } from 'vue'
-import { useWebSocket, useAgent, useChat, useConfig } from '@/composables'
+import { AgentStatus } from '@paget/shared'
+import { useWebSocket, useAgent, useChat, useConfig, usePageController } from '@/composables'
 import { useConfigStore } from '@/stores/config'
 import { useChatStore } from '@/stores/chat'
 import ChatHeader from './ChatHeader.vue'
@@ -32,7 +33,14 @@ const chatStore = useChatStore()
 const {
   connect, submitTask, cancelTask,
   onStatusChange, onHistoryChange, onActivity,
+  onPageAction, onBatchAction,
+  reportPageState, reportBatchResult,
 } = useWebSocket()
+
+// 页面控制器（DOM 状态提取 + 操作执行）/ Page controller (DOM extraction + action execution)
+const { getBrowserState, executeBatch, showMask, hideMask } = usePageController({
+  enableMask: true,
+})
 
 // Agent 状态管理 / Agent state management
 const {
@@ -47,13 +55,43 @@ const { messages, inputText, messageListRef, sendMessage } = useChat()
 // 组件挂载时建立连接 / Establish connection on mount
 onMounted(async () => {
   connect()
+
   // 注册事件监听，同时同步状态到 Pinia store / Register listeners and sync status to Pinia store
   onStatusChange((payload) => {
     agentHandleStatus(payload)
     chatStore.status = payload.status
+
+    // Agent 开始运行时显示遮罩层，结束时隐藏 / Show mask when agent starts, hide when done
+    if (payload.status === AgentStatus.RUNNING) {
+      showMask()
+    } else if (
+      payload.status === AgentStatus.IDLE
+      || payload.status === AgentStatus.COMPLETED
+      || payload.status === AgentStatus.ERROR
+    ) {
+      hideMask()
+    }
   })
   onHistoryChange(handleHistoryChange)
   onActivity(handleActivity)
+
+  // 监听页面状态请求：提取 DOM 状态并上报 / Listen for page state requests: extract DOM and report
+  onPageAction(async (payload) => {
+    if (payload.type === 'get_state') {
+      const state = await getBrowserState()
+      reportPageState({
+        sessionId: payload.sessionId,
+        ...state,
+      })
+    }
+  })
+
+  // 监听批量操作指令：执行操作并上报结果 / Listen for batch actions: execute and report results
+  onBatchAction(async (payload) => {
+    const result = await executeBatch(payload.actions)
+    reportBatchResult(payload.sessionId, result.results)
+  })
+
   await configStore.loadLLMConfigs()
 })
 
