@@ -2,30 +2,45 @@
  * 聊天消息状态与自动滚动行为管理
  * Manages chat message state and auto-scroll behavior
  */
-import { ref, nextTick } from 'vue'
-import type { ChatMessage, StreamChunkPayload } from '@paget/shared'
+import { ref, nextTick } from "vue";
+import type { ChatMessage, StreamChunkPayload } from "@paget/shared";
+
+// 兼容 crypto.randomUUID
+function generateUUID(): string {
+  if (
+    typeof crypto !== "undefined" &&
+    typeof crypto.randomUUID === "function"
+  ) {
+    return crypto.randomUUID();
+  }
+  return "xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx".replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === "x" ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
 
 export function useChat() {
   // 消息列表 / Message list
-  const messages = ref<ChatMessage[]>([])
+  const messages = ref<ChatMessage[]>([]);
   // 输入框文本 / Input text
-  const inputText = ref('')
+  const inputText = ref("");
   // 消息列表 DOM 引用（用于滚动控制）/ Message list DOM reference (for scroll control)
-  const messageListRef = ref<HTMLElement | null>(null)
+  const messageListRef = ref<HTMLElement | null>(null);
 
   /**
    * 添加用户消息 / Add a user message
    */
   function addUserMessage(content: string): ChatMessage {
     const msg: ChatMessage = {
-      id: crypto.randomUUID(),
-      role: 'user',
+      id: generateUUID(),
+      role: "user",
       content,
       timestamp: Date.now(),
-    }
-    messages.value.push(msg)
-    scrollToBottom()
-    return msg
+    };
+    messages.value.push(msg);
+    scrollToBottom();
+    return msg;
   }
 
   /**
@@ -33,14 +48,14 @@ export function useChat() {
    */
   function addAssistantMessage(content: string): ChatMessage {
     const msg: ChatMessage = {
-      id: crypto.randomUUID(),
-      role: 'assistant',
+      id: generateUUID(),
+      role: "assistant",
       content,
       timestamp: Date.now(),
-    }
-    messages.value.push(msg)
-    scrollToBottom()
-    return msg
+    };
+    messages.value.push(msg);
+    scrollToBottom();
+    return msg;
   }
 
   /**
@@ -48,18 +63,18 @@ export function useChat() {
    */
   function addSystemMessage(content: string): ChatMessage {
     const msg: ChatMessage = {
-      id: crypto.randomUUID(),
-      role: 'system',
+      id: generateUUID(),
+      role: "system",
       content,
       timestamp: Date.now(),
-    }
-    messages.value.push(msg)
-    scrollToBottom()
-    return msg
+    };
+    messages.value.push(msg);
+    scrollToBottom();
+    return msg;
   }
 
   // 当前正在流式输出的消息 ID / Currently streaming message ID
-  const streamingMessageId = ref<string | null>(null)
+  const streamingMessageId = ref<string | null>(null);
 
   /**
    * 处理 LLM 流式文本分片，实现逐字渲染 / Handle LLM streaming text chunks for typewriter rendering
@@ -68,35 +83,35 @@ export function useChat() {
    * incrementally to the same assistant message.
    */
   function handleStreamChunk(payload: StreamChunkPayload) {
-    const existing = messages.value.find(m => m.id === payload.messageId)
+    const existing = messages.value.find((m) => m.id === payload.messageId);
     if (existing) {
-      existing.content += payload.chunk
+      existing.content += payload.chunk;
     } else {
       messages.value.push({
         id: payload.messageId,
-        role: 'assistant',
+        role: "assistant",
         content: payload.chunk,
         timestamp: Date.now(),
-      })
+      });
     }
 
     // 跟踪流式消息 ID / Track streaming message ID
     if (payload.done) {
-      streamingMessageId.value = null
+      streamingMessageId.value = null;
     } else {
-      streamingMessageId.value = payload.messageId
+      streamingMessageId.value = payload.messageId;
     }
 
-    if (payload.done || !existing) scrollToBottom()
+    if (payload.done || !existing) scrollToBottom();
   }
 
   /**
    * 滚动消息列表到底部 / Scroll the message list to the bottom
    */
   async function scrollToBottom() {
-    await nextTick()
+    await nextTick();
     if (messageListRef.value) {
-      messageListRef.value.scrollTop = messageListRef.value.scrollHeight
+      messageListRef.value.scrollTop = messageListRef.value.scrollHeight;
     }
   }
 
@@ -104,7 +119,7 @@ export function useChat() {
    * 清空所有消息 / Clear all messages
    */
   function clearMessages() {
-    messages.value = []
+    messages.value = [];
   }
 
   /**
@@ -112,11 +127,11 @@ export function useChat() {
    * Handle sending a message (get input text, clear input, add user message)
    */
   function sendMessage(): string | null {
-    const text = inputText.value.trim()
-    if (!text) return null
-    inputText.value = ''
-    addUserMessage(text)
-    return text
+    const text = inputText.value.trim();
+    if (!text) return null;
+    inputText.value = "";
+    addUserMessage(text);
+    return text;
   }
 
   return {
@@ -131,5 +146,5 @@ export function useChat() {
     scrollToBottom,
     clearMessages,
     sendMessage,
-  }
+  };
 }
