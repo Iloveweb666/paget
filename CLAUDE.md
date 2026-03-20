@@ -53,15 +53,23 @@ Browser (UI + PageController)  ←— WebSocket —→  Server (Agent + LLM)
 
 ### Language / 语言
 
-- **All code comments MUST be bilingual (Chinese + English)**. Write Chinese first, then English on the same line or next line.
-- Format: `// 中文说明 / English explanation`
-- For JSDoc/block comments:
+**代码注释（Code Comments）**：
+- **双语（中文 + 英文）**，中文在前，英文在后
+- 单行格式: `// 中文说明 / English explanation`
+- 多行格式:
   ```ts
   /**
    * 获取当前页面的浏览器状态快照
    * Get a browser state snapshot of the current page
    */
   ```
+
+**UI 页面文案（User-facing Text）**：
+- **中文单语**，包括按钮文字、提示信息、标签等用户可见的文本
+- 后续通过 i18n 模块实现多语言切换，届时使用 `t('key')` 方式引用
+- 示例：`<button>提交</button>` 而非 `<button>提交 / Submit</button>`
+
+**其他规则**：
 - Variable names, function names, class names: **English only**
 - Commit messages: English
 - Documentation files (.md): Chinese preferred, English acceptable

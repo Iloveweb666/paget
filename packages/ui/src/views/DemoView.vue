@@ -46,44 +46,44 @@ const form = reactive({
 
 // 部门选项 / Department options
 const departments = [
-  { value: 'engineering', label: '工程部 / Engineering' },
-  { value: 'product', label: '产品部 / Product' },
-  { value: 'design', label: '设计部 / Design' },
-  { value: 'marketing', label: '市场部 / Marketing' },
-  { value: 'hr', label: '人力资源部 / Human Resources' },
-  { value: 'finance', label: '财务部 / Finance' },
+  { value: 'engineering', label: '工程部' },
+  { value: 'product', label: '产品部' },
+  { value: 'design', label: '设计部' },
+  { value: 'marketing', label: '市场部' },
+  { value: 'hr', label: '人力资源部' },
+  { value: 'finance', label: '财务部' },
 ]
 
 // 岗位选项（根据部门联动）/ Position options (cascading from department)
 const positionMap: Record<string, { value: string; label: string }[]> = {
   engineering: [
-    { value: 'frontend', label: '前端开发 / Frontend Dev' },
-    { value: 'backend', label: '后端开发 / Backend Dev' },
-    { value: 'fullstack', label: '全栈开发 / Full-stack Dev' },
-    { value: 'devops', label: 'DevOps 工程师 / DevOps Engineer' },
-    { value: 'qa', label: '测试工程师 / QA Engineer' },
+    { value: 'frontend', label: '前端开发' },
+    { value: 'backend', label: '后端开发' },
+    { value: 'fullstack', label: '全栈开发' },
+    { value: 'devops', label: 'DevOps 工程师' },
+    { value: 'qa', label: '测试工程师' },
   ],
   product: [
-    { value: 'pm', label: '产品经理 / Product Manager' },
-    { value: 'po', label: '产品负责人 / Product Owner' },
+    { value: 'pm', label: '产品经理' },
+    { value: 'po', label: '产品负责人' },
   ],
   design: [
-    { value: 'ui', label: 'UI 设计师 / UI Designer' },
-    { value: 'ux', label: 'UX 设计师 / UX Designer' },
-    { value: 'graphic', label: '平面设计师 / Graphic Designer' },
+    { value: 'ui', label: 'UI 设计师' },
+    { value: 'ux', label: 'UX 设计师' },
+    { value: 'graphic', label: '平面设计师' },
   ],
   marketing: [
-    { value: 'content', label: '内容运营 / Content Marketing' },
-    { value: 'growth', label: '增长运营 / Growth Marketing' },
-    { value: 'brand', label: '品牌经理 / Brand Manager' },
+    { value: 'content', label: '内容运营' },
+    { value: 'growth', label: '增长运营' },
+    { value: 'brand', label: '品牌经理' },
   ],
   hr: [
-    { value: 'recruiter', label: '招聘专员 / Recruiter' },
+    { value: 'recruiter', label: '招聘专员' },
     { value: 'hrbp', label: 'HRBP' },
   ],
   finance: [
-    { value: 'accountant', label: '会计 / Accountant' },
-    { value: 'auditor', label: '审计 / Auditor' },
+    { value: 'accountant', label: '会计' },
+    { value: 'auditor', label: '审计' },
   ],
 }
 
@@ -110,15 +110,15 @@ const showContractDuration = computed(() =>
 
 // 表单校验规则 / Form validation rules
 const rules = reactive<FormRules>({
-  fullName: [{ required: true, message: '请输入姓名 / Please enter name', trigger: 'blur' }],
+  fullName: [{ required: true, message: '请输入姓名', trigger: 'blur' }],
   email: [
-    { required: true, message: '请输入邮箱 / Please enter email', trigger: 'blur' },
-    { type: 'email', message: '邮箱格式不正确 / Invalid email format', trigger: 'blur' },
+    { required: true, message: '请输入邮箱', trigger: 'blur' },
+    { type: 'email', message: '邮箱格式不正确', trigger: 'blur' },
   ],
-  startDate: [{ required: true, message: '请选择入职日期 / Please select start date', trigger: 'change' }],
-  department: [{ required: true, message: '请选择部门 / Please select department', trigger: 'change' }],
-  position: [{ required: true, message: '请选择岗位 / Please select position', trigger: 'change' }],
-  employeeType: [{ required: true, message: '请选择员工类型 / Please select employee type', trigger: 'change' }],
+  startDate: [{ required: true, message: '请选择入职日期', trigger: 'change' }],
+  department: [{ required: true, message: '请选择部门', trigger: 'change' }],
+  position: [{ required: true, message: '请选择岗位', trigger: 'change' }],
+  employeeType: [{ required: true, message: '请选择员工类型', trigger: 'change' }],
 })
 
 // 提交时的快照数据 / Snapshot of submitted data
@@ -149,7 +149,7 @@ async function handleSubmit() {
   if (!valid) return
 
   if (!form.agreeTerms) {
-    ElMessage.warning('请先同意协议 / Please agree to the terms first')
+    ElMessage.warning('请先同意协议')
     return
   }
 
@@ -165,9 +165,9 @@ async function handleSubmit() {
     department: deptItem?.label || form.department,
     position: posItem?.label || form.position,
     employeeType: employeeTypeLabel(form.employeeType),
-    contractDuration: showContractDuration.value ? `${form.contractDuration || '—'} 个月 / months` : '—',
+    contractDuration: showContractDuration.value ? `${form.contractDuration || '—'} 个月` : '—',
     skills: form.skills.length ? form.skills.join(', ') : '—',
-    needEquipment: form.needEquipment ? '是 / Yes' : '否 / No',
+    needEquipment: form.needEquipment ? '是' : '否',
     equipmentNote: form.needEquipment && form.equipmentNote ? form.equipmentNote : '—',
     bio: form.bio || '—',
     notes: form.notes || '—',
@@ -175,7 +175,7 @@ async function handleSubmit() {
   }
 
   pageState.value = 'summary'
-  ElMessage.success('提交成功！/ Submitted successfully!')
+  ElMessage.success('提交成功！')
 }
 
 /**
@@ -183,10 +183,10 @@ async function handleSubmit() {
  */
 function employeeTypeLabel(val: string): string {
   const map: Record<string, string> = {
-    fulltime: '全职 / Full-time',
-    parttime: '兼职 / Part-time',
-    intern: '实习 / Intern',
-    contractor: '外包 / Contractor',
+    fulltime: '全职',
+    parttime: '兼职',
+    intern: '实习',
+    contractor: '外包',
   }
   return map[val] || val
 }
@@ -232,8 +232,8 @@ function handleBackToForm() {
           <span class="demo-nav__title">Paget Demo</span>
         </div>
         <nav class="demo-nav__links">
-          <a href="/" class="demo-nav__link">Home</a>
-          <a href="/demo" class="demo-nav__link demo-nav__link--active">Demo Form</a>
+          <a href="/" class="demo-nav__link">首页</a>
+          <a href="/demo" class="demo-nav__link demo-nav__link--active">演示表单</a>
         </nav>
       </div>
     </header>
@@ -243,7 +243,7 @@ function handleBackToForm() {
       <div class="demo-form-container">
         <div class="demo-form__header">
           <h1 class="demo-form__title">新员工入职登记表</h1>
-          <p class="demo-form__subtitle">Employee Onboarding Registration Form</p>
+          <p class="demo-form__subtitle">请填写以下信息完成入职登记</p>
         </div>
 
         <!-- ==================== 表单模式 / Form mode ==================== -->
@@ -257,23 +257,23 @@ function handleBackToForm() {
           >
             <!-- 基本信息 / Basic Information -->
             <div class="demo-section">
-              <div class="demo-section__title">基本信息 / Basic Information</div>
+              <div class="demo-section__title">基本信息</div>
 
-              <el-form-item label="姓名 / Full Name" prop="fullName">
-                <el-input v-model="form.fullName" placeholder="请输入姓名 / Enter full name" />
+              <el-form-item label="姓名" prop="fullName">
+                <el-input v-model="form.fullName" placeholder="请输入姓名" />
               </el-form-item>
 
               <div class="demo-row">
-                <el-form-item label="邮箱 / Email" prop="email" class="demo-row__item">
+                <el-form-item label="邮箱" prop="email" class="demo-row__item">
                   <el-input v-model="form.email" type="email" placeholder="name@company.com" />
                 </el-form-item>
-                <el-form-item label="电话 / Phone" prop="phone" class="demo-row__item">
+                <el-form-item label="电话" prop="phone" class="demo-row__item">
                   <el-input v-model="form.phone" placeholder="138-xxxx-xxxx" />
                 </el-form-item>
               </div>
 
               <div class="demo-row">
-                <el-form-item label="年龄 / Age" prop="age" class="demo-row__item">
+                <el-form-item label="年龄" prop="age" class="demo-row__item">
                   <el-input-number
                     v-model="form.age"
                     :min="18"
@@ -283,11 +283,11 @@ function handleBackToForm() {
                     style="width: 100%"
                   />
                 </el-form-item>
-                <el-form-item label="入职日期 / Start Date" prop="startDate" class="demo-row__item">
+                <el-form-item label="入职日期" prop="startDate" class="demo-row__item">
                   <el-date-picker
                     v-model="form.startDate"
                     type="date"
-                    placeholder="选择日期 / Select date"
+                    placeholder="选择日期"
                     format="YYYY-MM-DD"
                     value-format="YYYY-MM-DD"
                     style="width: 100%"
@@ -298,13 +298,13 @@ function handleBackToForm() {
 
             <!-- 岗位信息（部门→岗位联动）/ Position Information (department→position cascading) -->
             <div class="demo-section">
-              <div class="demo-section__title">岗位信息 / Position Information</div>
+              <div class="demo-section__title">岗位信息</div>
 
               <div class="demo-row">
-                <el-form-item label="部门 / Department" prop="department" class="demo-row__item">
+                <el-form-item label="部门" prop="department" class="demo-row__item">
                   <el-select
                     v-model="form.department"
-                    placeholder="请选择部门 / Select Department"
+                    placeholder="请选择部门"
                     style="width: 100%"
                     @change="onDepartmentChange"
                   >
@@ -316,10 +316,10 @@ function handleBackToForm() {
                     />
                   </el-select>
                 </el-form-item>
-                <el-form-item label="岗位 / Position" prop="position" class="demo-row__item">
+                <el-form-item label="岗位" prop="position" class="demo-row__item">
                   <el-select
                     v-model="form.position"
-                    placeholder="请先选择部门 / Select department first"
+                    placeholder="请先选择部门"
                     :disabled="!form.department"
                     style="width: 100%"
                   >
@@ -333,19 +333,19 @@ function handleBackToForm() {
                 </el-form-item>
               </div>
 
-              <el-form-item label="员工类型 / Employee Type" prop="employeeType">
+              <el-form-item label="员工类型" prop="employeeType">
                 <el-radio-group v-model="form.employeeType" @change="onEmployeeTypeChange">
-                  <el-radio value="fulltime">全职 / Full-time</el-radio>
-                  <el-radio value="parttime">兼职 / Part-time</el-radio>
-                  <el-radio value="intern">实习 / Intern</el-radio>
-                  <el-radio value="contractor">外包 / Contractor</el-radio>
+                  <el-radio value="fulltime">全职</el-radio>
+                  <el-radio value="parttime">兼职</el-radio>
+                  <el-radio value="intern">实习</el-radio>
+                  <el-radio value="contractor">外包</el-radio>
                 </el-radio-group>
               </el-form-item>
 
               <!-- 联动：外包/兼职时显示合同期限 / Cascading: show contract duration for contractor/parttime -->
               <el-form-item
                 v-if="showContractDuration"
-                label="合同期限（月）/ Contract Duration (months)"
+                label="合同期限（月）"
                 prop="contractDuration"
               >
                 <el-input-number
@@ -361,9 +361,9 @@ function handleBackToForm() {
 
             <!-- 技能与其他 / Skills & Others -->
             <div class="demo-section">
-              <div class="demo-section__title">技能与自我介绍 / Skills & Bio</div>
+              <div class="demo-section__title">技能与自我介绍</div>
 
-              <el-form-item label="技能标签 / Skills" prop="skills">
+              <el-form-item label="技能标签" prop="skills">
                 <el-checkbox-group v-model="form.skills">
                   <el-checkbox
                     v-for="skill in skillOptions"
@@ -375,38 +375,38 @@ function handleBackToForm() {
               </el-form-item>
 
               <!-- 联动：是否需要设备 → 设备备注 / Cascading: need equipment → equipment note -->
-              <el-form-item label="是否需要配备设备 / Need Equipment">
+              <el-form-item label="是否需要配备设备">
                 <el-switch v-model="form.needEquipment" />
               </el-form-item>
 
               <el-form-item
                 v-if="form.needEquipment"
-                label="设备需求说明 / Equipment Requirements"
+                label="设备需求说明"
                 prop="equipmentNote"
               >
                 <el-input
                   v-model="form.equipmentNote"
                   type="textarea"
                   :rows="2"
-                  placeholder="例如：MacBook Pro 16 寸 / e.g., MacBook Pro 16 inch"
+                  placeholder="例如：MacBook Pro 16 寸"
                 />
               </el-form-item>
 
-              <el-form-item label="个人简介 / Personal Bio" prop="bio">
+              <el-form-item label="个人简介" prop="bio">
                 <el-input
                   v-model="form.bio"
                   type="textarea"
                   :rows="3"
-                  placeholder="请简要介绍自己 / Brief self-introduction"
+                  placeholder="请简要介绍自己"
                 />
               </el-form-item>
 
-              <el-form-item label="备注 / Notes" prop="notes">
+              <el-form-item label="备注" prop="notes">
                 <el-input
                   v-model="form.notes"
                   type="textarea"
                   :rows="2"
-                  placeholder="其他需要说明的事项 / Additional notes"
+                  placeholder="其他需要说明的事项"
                 />
               </el-form-item>
             </div>
@@ -415,16 +415,16 @@ function handleBackToForm() {
             <div class="demo-form__footer">
               <el-form-item prop="agreeTerms">
                 <el-checkbox v-model="form.agreeTerms">
-                  我已阅读并同意《员工手册》及相关规定 / I have read and agree to the Employee Handbook
+                  我已阅读并同意《员工手册》及相关规定
                 </el-checkbox>
               </el-form-item>
 
               <div class="demo-form__actions">
                 <el-button type="primary" size="large" :disabled="!form.agreeTerms" @click="handleSubmit">
-                  提交 / Submit
+                  提交
                 </el-button>
                 <el-button size="large" @click="formRef?.resetFields()">
-                  重置 / Reset
+                  重置
                 </el-button>
               </div>
             </div>
@@ -435,35 +435,35 @@ function handleBackToForm() {
         <div v-else class="demo-summary">
           <div class="demo-summary__badge">
             <span class="demo-summary__badge-icon">&#10003;</span>
-            提交成功！信息已入库 / Submitted! Data saved to database
+            提交成功！信息已入库
           </div>
 
           <el-descriptions
-            title="提交信息汇总 / Submission Summary"
+            title="提交信息汇总"
             :column="2"
             border
             size="default"
           >
-            <el-descriptions-item label="姓名 / Name">{{ submittedData.fullName }}</el-descriptions-item>
-            <el-descriptions-item label="邮箱 / Email">{{ submittedData.email }}</el-descriptions-item>
-            <el-descriptions-item label="电话 / Phone">{{ submittedData.phone }}</el-descriptions-item>
-            <el-descriptions-item label="年龄 / Age">{{ submittedData.age }}</el-descriptions-item>
-            <el-descriptions-item label="入职日期 / Start Date">{{ submittedData.startDate }}</el-descriptions-item>
-            <el-descriptions-item label="部门 / Department">{{ submittedData.department }}</el-descriptions-item>
-            <el-descriptions-item label="岗位 / Position">{{ submittedData.position }}</el-descriptions-item>
-            <el-descriptions-item label="员工类型 / Type">{{ submittedData.employeeType }}</el-descriptions-item>
-            <el-descriptions-item label="合同期限 / Contract">{{ submittedData.contractDuration }}</el-descriptions-item>
-            <el-descriptions-item label="技能 / Skills" :span="2">{{ submittedData.skills }}</el-descriptions-item>
-            <el-descriptions-item label="需要设备 / Equipment">{{ submittedData.needEquipment }}</el-descriptions-item>
-            <el-descriptions-item label="设备说明 / Equipment Note">{{ submittedData.equipmentNote }}</el-descriptions-item>
-            <el-descriptions-item label="个人简介 / Bio" :span="2">{{ submittedData.bio }}</el-descriptions-item>
-            <el-descriptions-item label="备注 / Notes" :span="2">{{ submittedData.notes }}</el-descriptions-item>
-            <el-descriptions-item label="提交时间 / Submitted At" :span="2">{{ submittedData.submittedAt }}</el-descriptions-item>
+            <el-descriptions-item label="姓名">{{ submittedData.fullName }}</el-descriptions-item>
+            <el-descriptions-item label="邮箱">{{ submittedData.email }}</el-descriptions-item>
+            <el-descriptions-item label="电话">{{ submittedData.phone }}</el-descriptions-item>
+            <el-descriptions-item label="年龄">{{ submittedData.age }}</el-descriptions-item>
+            <el-descriptions-item label="入职日期">{{ submittedData.startDate }}</el-descriptions-item>
+            <el-descriptions-item label="部门">{{ submittedData.department }}</el-descriptions-item>
+            <el-descriptions-item label="岗位">{{ submittedData.position }}</el-descriptions-item>
+            <el-descriptions-item label="员工类型">{{ submittedData.employeeType }}</el-descriptions-item>
+            <el-descriptions-item label="合同期限">{{ submittedData.contractDuration }}</el-descriptions-item>
+            <el-descriptions-item label="技能" :span="2">{{ submittedData.skills }}</el-descriptions-item>
+            <el-descriptions-item label="需要设备">{{ submittedData.needEquipment }}</el-descriptions-item>
+            <el-descriptions-item label="设备说明">{{ submittedData.equipmentNote }}</el-descriptions-item>
+            <el-descriptions-item label="个人简介" :span="2">{{ submittedData.bio }}</el-descriptions-item>
+            <el-descriptions-item label="备注" :span="2">{{ submittedData.notes }}</el-descriptions-item>
+            <el-descriptions-item label="提交时间" :span="2">{{ submittedData.submittedAt }}</el-descriptions-item>
           </el-descriptions>
 
           <div class="demo-summary__actions">
             <el-button type="primary" size="large" @click="handleBackToForm">
-              返回重新填写 / Back to Form
+              返回重新填写
             </el-button>
           </div>
         </div>

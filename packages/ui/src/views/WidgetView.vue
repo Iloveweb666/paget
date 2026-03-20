@@ -16,12 +16,15 @@
           <path d="M15 13v2" /><path d="M9 13v2" />
         </svg>
       </div>
-      <h1 class="widget-page__title">Paget AI Widget</h1>
+      <h1 class="widget-page__title">Paget AI 控件</h1>
       <p class="widget-page__hint">
-        Widget is running. Click the floating button to start chatting.
+        控件已运行。点击悬浮按钮开始对话。
       </p>
       <p class="widget-page__link">
-        Visit <a href="/demo">/demo</a> for a demo form page.
+        访问 <a href="/demo">/demo</a> 查看演示表单页面。
+      </p>
+      <p class="widget-page__link">
+        获取 <a href="/bookmarklet">书签脚本</a> 在任意页面使用 Paget AI。
       </p>
     </div>
   </div>

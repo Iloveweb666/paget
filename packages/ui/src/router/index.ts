@@ -19,6 +19,11 @@ const router = createRouter({
       name: 'demo',
       component: () => import('../views/DemoView.vue'),
     },
+    {
+      path: '/bookmarklet',
+      name: 'bookmarklet',
+      component: () => import('../views/BookmarkletView.vue'),
+    },
   ],
 })
 

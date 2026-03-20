@@ -5,7 +5,7 @@
  * 封装 Socket.IO 客户端连接，提供任务提交、取消、页面状态上报等功能
  * Encapsulates Socket.IO client connection, providing task submission, cancellation, page state reporting, etc.
  */
-import { ref, onUnmounted } from 'vue'
+import { ref, onUnmounted, inject } from 'vue'
 import { io, type Socket } from 'socket.io-client'
 import { WS_EVENTS } from '@paget/shared'
 import type {
@@ -17,7 +17,30 @@ import type {
 } from '@paget/shared'
 import { wsLogger } from './useWSLogger'
 
-export function useWebSocket(url = '/agent') {
+/**
+ * Bookmarklet 配置接口（通过 provide/inject 传递）
+ * Bookmarklet config interface (passed via provide/inject)
+ */
+interface PagetBookmarkletConfig {
+  serverUrl: string
+}
+
+export function useWebSocket(urlOrPath = '/agent') {
+  // 尝试从 inject 获取 Bookmarklet 配置（如果存在则使用完整 URL）
+  // Try to get Bookmarklet config from inject (use full URL if exists)
+  const bookmarkletConfig = inject<PagetBookmarkletConfig | null>('pagetConfig', null)
+
+  // 计算最终的 WebSocket URL / Calculate final WebSocket URL
+  let url: string
+  if (bookmarkletConfig?.serverUrl) {
+    // Bookmarklet 模式：使用完整 URL / Bookmarklet mode: use full URL
+    // 例如：wss://paget.xyz + /agent → wss://paget.xyz/agent
+    const baseUrl = bookmarkletConfig.serverUrl.replace(/\/$/, '')
+    url = urlOrPath.startsWith('/') ? `${baseUrl}${urlOrPath}` : `${baseUrl}/${urlOrPath}`
+  } else {
+    // 普通模式：使用相对路径 / Normal mode: use relative path
+    url = urlOrPath
+  }
   // Socket 实例引用 / Socket instance reference
   const socket = ref<Socket | null>(null)
   // 连接状态 / Connection status

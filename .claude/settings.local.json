@@ -9,7 +9,14 @@
       "Bash(wmic process:*)",
       "Bash(cd D:/adminWorkspace/paget/packages/server && npx nest build 2>&1)",
       "Bash(echo done:*)",
-      "Bash(tail:*)"
+      "Bash(tail:*)",
+      "Bash(pnpm build:bookmarklet:*)",
+      "Bash(npm whoami:*)",
+      "Bash(npx npm-cli-login -u maybe9527 -p tzj974895npm -e maybe9527@example.com -r https://registry.npmjs.org)",
+      "Bash(npx npm-cli-login -u maybe9527 -p tzj974895npm -e 2451499480@qq.com -r https://registry.npmjs.org)",
+      "Bash(npm publish:*)",
+      "WebFetch(domain:cdn.jsdelivr.net)",
+      "Bash(curl:*)"
     ]
   }
 }
