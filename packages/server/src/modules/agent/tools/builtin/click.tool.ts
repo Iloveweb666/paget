@@ -8,10 +8,14 @@ import { BaseTool } from '../base.tool';
 export class ClickTool extends BaseTool {
   readonly name = 'click';
   readonly description = 'Click an element by its index';
-  // 参数模式：元素索引 + 可选的双击标记 / Parameter schema: element index + optional double-click flag
+  // 参数模式：元素索引 + 可选双击标记 + 可选失焦控制 / Parameter schema: index + optional double-click + optional blur control
   readonly schema = z.object({
     index: z.number().describe('Element index to click'),
     doubleClick: z.boolean().optional().describe('Whether to double-click'),
+    blur: z
+      .boolean()
+      .optional()
+      .describe('Whether to blur after this click (use false for intermediate dropdown steps)'),
   });
 
   async execute(params: z.infer<typeof this.schema>): Promise<string> {

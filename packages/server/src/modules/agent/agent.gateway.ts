@@ -73,9 +73,9 @@ export class AgentGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @SubscribeMessage('task:submit')
   async handleTaskSubmit(
     @ConnectedSocket() client: Socket,
-    @MessageBody() data: { task: string; sessionId: string; llmConfigId?: string },
+    @MessageBody() data: { task: string; sessionId: string; llmConfigId?: string; maxSteps?: number },
   ) {
-    const { task, sessionId, llmConfigId } = data;
+    const { task, sessionId, llmConfigId, maxSteps } = data;
 
     // 记录 socket → session 映射，用于断连清理 / Track socket → session mapping for disconnect cleanup
     this.clientSessionMap.set(client.id, sessionId);
@@ -137,6 +137,7 @@ export class AgentGateway implements OnGatewayConnection, OnGatewayDisconnect {
         sessionId,
         task,
         llmConfigId,
+        maxSteps,
         getPageState: () => this.requestPageState(client, sessionId),
         executeBatchActions: (actions) => this.requestBatchActions(client, sessionId, actions),
         emitStatus: (status, message?) => {

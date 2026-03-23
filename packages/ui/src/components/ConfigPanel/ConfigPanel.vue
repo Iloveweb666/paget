@@ -25,7 +25,10 @@ watch(config, (val) => { draft.value = { ...val } }, { deep: true })
  * 保存设置：将副本写回配置 / Save settings: write draft back to config
  */
 function handleSave() {
-  config.value = { ...draft.value }
+  const safeMaxSteps = Number.isFinite(draft.value.maxSteps)
+    ? Math.max(1, Math.min(200, Math.floor(draft.value.maxSteps)))
+    : 40
+  config.value = { ...draft.value, maxSteps: safeMaxSteps }
   emit('close')
 }
 
@@ -78,6 +81,19 @@ function handleBackdropClick(e: MouseEvent) {
                 <path d="m6 9 6 6 6-6" />
               </svg>
             </div>
+          </div>
+
+          <!-- 最大步数 / Max steps -->
+          <div class="settings-modal__section">
+            <label class="settings-modal__label">{{ t('settings.maxSteps') }}</label>
+            <input
+              v-model.number="draft.maxSteps"
+              class="settings-modal__input"
+              type="number"
+              min="1"
+              max="200"
+              step="1"
+            />
           </div>
 
           <!-- 分割线 / Divider -->
@@ -281,7 +297,24 @@ function handleBackdropClick(e: MouseEvent) {
   -webkit-appearance: none;
 }
 
+.settings-modal__input {
+  width: 100%;
+  height: 40px;
+  padding: 0 12px;
+  border: 1px solid var(--paget-border);
+  border-radius: var(--paget-radius-md);
+  background: var(--paget-bg-secondary);
+  font-family: var(--paget-font-family);
+  font-size: var(--paget-font-size-md);
+  color: var(--paget-text);
+  outline: none;
+}
+
 .settings-modal__select:focus {
+  border-color: var(--paget-primary);
+}
+
+.settings-modal__input:focus {
   border-color: var(--paget-primary);
 }
 

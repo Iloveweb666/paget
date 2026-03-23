@@ -1,7 +1,7 @@
 packages:
   - packages/*
-
 onlyBuiltDependencies:
   - esbuild
   - '@nestjs/core'
   - vue-demi
+registry: https://registry.npmjs.org/

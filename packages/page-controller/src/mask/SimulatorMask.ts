@@ -10,6 +10,9 @@ export class SimulatorMask {
   private highlight: HTMLDivElement | null = null;
   // 状态提示标签 / Status indicator badge
   private badge: HTMLDivElement | null = null;
+  // 记录并恢复原始 overflow 样式 / Keep original overflow styles for restore
+  private prevHtmlOverflow: string | null = null;
+  private prevBodyOverflow: string | null = null;
 
   /**
    * 显示遮罩层，阻止用户交互
@@ -18,6 +21,14 @@ export class SimulatorMask {
   show(): void {
     // 如果已经显示则跳过 / Skip if already shown
     if (this.overlay) return;
+
+    // 锁定页面滚动，确保遮罩完全覆盖交互 / Lock page scroll so the mask fully covers interactions
+    const html = document.documentElement;
+    const body = document.body;
+    this.prevHtmlOverflow = html.style.overflow;
+    this.prevBodyOverflow = body.style.overflow;
+    html.style.overflow = "hidden";
+    body.style.overflow = "hidden";
 
     // 创建全屏遮罩层（带半透明底色和内边框）/ Create full-screen overlay with subtle background and inner border
     this.overlay = document.createElement("div");
@@ -108,6 +119,14 @@ export class SimulatorMask {
     this.highlight = null;
     this.badge?.remove();
     this.badge = null;
+
+    // 恢复页面原始滚动样式 / Restore original page scroll styles
+    const html = document.documentElement;
+    const body = document.body;
+    html.style.overflow = this.prevHtmlOverflow ?? "";
+    body.style.overflow = this.prevBodyOverflow ?? "";
+    this.prevHtmlOverflow = null;
+    this.prevBodyOverflow = null;
   }
 
   /**

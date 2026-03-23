@@ -46,6 +46,13 @@ export function usePageController(config?: PageControllerConfig) {
     controller.hideMask()
   }
 
+  /**
+   * 动态设置遮罩开关 / Dynamically toggle mask behavior
+   */
+  function setMaskEnabled(enabled: boolean): void {
+    controller.setMaskEnabled(enabled)
+  }
+
   // 组件卸载时清理资源 / Clean up on unmount
   onUnmounted(() => {
     controller.dispose()
@@ -57,5 +64,6 @@ export function usePageController(config?: PageControllerConfig) {
     executeBatch,
     showMask,
     hideMask,
+    setMaskEnabled,
   }
 }

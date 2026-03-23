@@ -8,23 +8,20 @@
  * - historychange（持久化事件，用于 LLM 上下文）/ historychange (persistent events for LLM context)
  * - activity（瞬态 UI 反馈）/ activity (transient UI feedback)
  */
-import { ref, computed } from 'vue'
+import { computed } from 'vue'
+import { storeToRefs } from 'pinia'
 import { AgentStatus } from '@paget/shared'
 import type {
   StatusChangePayload,
   HistoryEvent,
   ActivityPayload,
 } from '@paget/shared'
+import { useChatStore } from '@/stores/chat'
 
 export function useAgent() {
-  // Agent 当前状态 / Agent current status
-  const status = ref<AgentStatus>(AgentStatus.IDLE)
-  // 历史事件列表（步骤、观察、错误）/ History event list (steps, observations, errors)
-  const history = ref<HistoryEvent[]>([])
-  // 当前活动指示（瞬态）/ Current activity indicator (transient)
-  const currentActivity = ref<ActivityPayload | null>(null)
-  // 当前任务 ID / Current task ID
-  const taskId = ref<string | null>(null)
+  // 统一从 Pinia 读取 Agent 相关状态 / Read agent-related state from Pinia
+  const chatStore = useChatStore()
+  const { status, history, activity: currentActivity, taskId } = storeToRefs(chatStore)
 
   // 是否正在运行 / Whether the agent is running
   const isRunning = computed(() => status.value === AgentStatus.RUNNING)
@@ -39,7 +36,11 @@ export function useAgent() {
     taskId.value = payload.taskId || null
 
     // Agent 变为空闲或已完成时清除活动指示 / Clear activity when agent becomes idle or completed
-    if (payload.status === AgentStatus.IDLE || payload.status === AgentStatus.COMPLETED) {
+    if (
+      payload.status === AgentStatus.IDLE ||
+      payload.status === AgentStatus.COMPLETED ||
+      payload.status === AgentStatus.ERROR
+    ) {
       currentActivity.value = null
     }
   }

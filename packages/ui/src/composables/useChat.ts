@@ -3,7 +3,9 @@
  * Manages chat message state and auto-scroll behavior
  */
 import { ref, nextTick } from "vue";
+import { storeToRefs } from "pinia";
 import type { ChatMessage, StreamChunkPayload } from "@paget/shared";
+import { useChatStore } from "@/stores/chat";
 
 // 兼容 crypto.randomUUID
 function generateUUID(): string {
@@ -21,10 +23,9 @@ function generateUUID(): string {
 }
 
 export function useChat() {
-  // 消息列表 / Message list
-  const messages = ref<ChatMessage[]>([]);
-  // 输入框文本 / Input text
-  const inputText = ref("");
+  // 统一使用 Pinia 聊天 Store / Use Pinia chat store as single source of truth
+  const chatStore = useChatStore();
+  const { messages, inputText, streamingMessageId } = storeToRefs(chatStore);
   // 消息列表 DOM 引用（用于滚动控制）/ Message list DOM reference (for scroll control)
   const messageListRef = ref<HTMLElement | null>(null);
 
@@ -73,9 +74,6 @@ export function useChat() {
     return msg;
   }
 
-  // 当前正在流式输出的消息 ID / Currently streaming message ID
-  const streamingMessageId = ref<string | null>(null);
-
   /**
    * 处理 LLM 流式文本分片，实现逐字渲染 / Handle LLM streaming text chunks for typewriter rendering
    * 当用户进行纯对话时，将流式分片增量追加到同一条 assistant 消息中。
@@ -120,6 +118,7 @@ export function useChat() {
    */
   function clearMessages() {
     messages.value = [];
+    streamingMessageId.value = null;
   }
 
   /**

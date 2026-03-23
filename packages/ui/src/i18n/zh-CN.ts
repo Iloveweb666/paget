@@ -51,6 +51,7 @@ export default {
   settings: {
     title: '全局设置',
     language: '语言 / Language',
+    maxSteps: '最大步数',
     showMask: '展示遮罩层',
     darkMode: '深色模式',
     notification: '消息通知',

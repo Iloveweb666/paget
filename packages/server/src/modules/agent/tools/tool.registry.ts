@@ -6,7 +6,13 @@ import { Injectable } from '@nestjs/common';
 import { BaseTool } from './base.tool';
 import { ClickTool } from './builtin/click.tool';
 import { InputTool } from './builtin/input.tool';
+import { SelectTool } from './builtin/select.tool';
+import { ScrollTool } from './builtin/scroll.tool';
+import { ScrollHorizontallyTool } from './builtin/scroll-horizontally.tool';
+import { WaitTool } from './builtin/wait.tool';
 import { DoneTool } from './builtin/done.tool';
+import { AskUserTool } from './builtin/ask-user.tool';
+import { ExecuteJavascriptTool } from './builtin/execute-javascript.tool';
 
 @Injectable()
 export class ToolRegistry {
@@ -18,9 +24,19 @@ export class ToolRegistry {
     this.registerBuiltinTools();
   }
 
-  // 注册内置工具（click、input、done） / Register built-in tools (click, input, done)
+  // 注册内置工具（与系统提示词能力对齐） / Register built-in tools (aligned with system prompt capabilities)
   private registerBuiltinTools(): void {
-    const builtins = [new ClickTool(), new InputTool(), new DoneTool()];
+    const builtins = [
+      new ClickTool(),
+      new InputTool(),
+      new SelectTool(),
+      new ScrollTool(),
+      new ScrollHorizontallyTool(),
+      new WaitTool(),
+      new DoneTool(),
+      new AskUserTool(),
+      new ExecuteJavascriptTool(),
+    ];
     for (const tool of builtins) {
       this.register(tool);
     }

@@ -16,7 +16,7 @@ Shared TypeScript type definitions and constants used by both frontend and backe
 
 ### 类型 / Types
 
-- **`AgentAction`** — 原子操作（click, input, scroll, done 等）
+- **`AgentAction`** — 原子操作（click, input, select, scroll, wait, done, ask_user 等）
 - **`ActionResult`** / **`BatchResult`** — 操作执行结果
 - **`MacroToolOutput`** — LLM 输出结构（反思 + 批量操作）
 - **`HistoryEvent`** — 历史事件联合类型（step / observation / error）

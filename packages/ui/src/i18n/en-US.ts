@@ -51,6 +51,7 @@ export default {
   settings: {
     title: 'Settings',
     language: 'Language',
+    maxSteps: 'Max Steps',
     showMask: 'Show Mask',
     darkMode: 'Dark Mode',
     notification: 'Notifications',

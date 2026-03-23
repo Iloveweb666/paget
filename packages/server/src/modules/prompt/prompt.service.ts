@@ -58,14 +58,18 @@ const DEFAULT_SYSTEM_PROMPT = `You are a web page automation agent. You can inte
 3. **Minimal Actions**: Use the fewest actions necessary. Only separate into different steps when you need to observe the page state after an action.
 
 ## Available Actions
-- click(index): Click an element by its index
-- input(index, text): Input text into a field
-- select(index, value): Select a dropdown option
+- click(index, doubleClick?, blur?): Click an element by its index
+- input(index, text, blur?): Input text into a field
+- select(index, value, blur?): Select a dropdown option
 - scroll(direction, amount?): Scroll the page
 - wait(ms): Wait for a specified time
 - done(message): Complete the task
 - ask_user(question): Ask the user for clarification
 - execute_javascript(code): Execute JavaScript (use sparingly)
+
+## Focus / Blur Guidance
+- For complete input actions, keep blur=true (default)
+- For multi-step dropdown flows, set blur=false on intermediate clicks
 
 ## Output Format
 For each step, output:

@@ -17,7 +17,7 @@ Paget is an AI-powered web page automation and interaction agent. It connects br
 │  │  (Vue 3)  │  │  (DOM 操控)     │ ←───→ │  │ (NestJS)│  │  (LangChain) │  │
 │  └───────────┘  └────────────────┘  │     │  └─────────┘  └──────────────┘  │
 │                                     │     │       │                          │
-│  Chat UI / 操作遮罩 / 元素高亮       │     │  Session / Prompt / MySQL       │
+│  Chat UI / 操作遮罩 / 元素高亮       │     │  Session / Prompt / Memory     │
 └─────────────────────────────────────┘     └──────────────────────────────────┘
 ```
 
@@ -33,10 +33,10 @@ Each agent step outputs:
 
 ### 事件模型 / Event Model
 
-| 类型 / Type | 用途 / Purpose | 持久化 / Persisted |
+| 类型 / Type | 用途 / Purpose | 存储 / Storage |
 |---|---|---|
-| `statuschange` | Agent 生命周期：idle → running → completed/error | Yes |
-| `historychange` | 步骤、观察、错误记录（作为 LLM 上下文）| Yes |
+| `statuschange` | Agent 生命周期：idle → running → completed/error | 会话内存 / Session memory |
+| `historychange` | 步骤、观察、错误记录（作为 LLM 上下文）| 会话内存 / Session memory |
 | `activity` | 瞬态 UI 反馈：thinking / executing / executed | No |
 
 ## 技术栈 / Tech Stack
@@ -44,8 +44,7 @@ Each agent step outputs:
 | 层级 / Layer | 技术 / Technology |
 |---|---|
 | 前端 / Frontend | Vue 3 + TypeScript + Vite + Pinia |
-| 后端 / Backend | NestJS + TypeORM + LangChain.js |
-| 数据库 / Database | MySQL |
+| 后端 / Backend | NestJS + LangChain.js |
 | 实时通信 / Realtime | Socket.IO (WebSocket) |
 | 包管理 / Monorepo | pnpm workspace |
 
@@ -81,7 +80,6 @@ paget/
 
 - Node.js >= 18.0.0
 - pnpm >= 8.0.0
-- MySQL 8.0+
 
 ### 安装 / Install
 
@@ -95,24 +93,25 @@ pnpm install
 
 ```bash
 cp .env.example .env
-# 编辑 .env 填写数据库连接和 LLM API Key
-# Edit .env with your database connection and LLM API key
+# 编辑 .env 填写运行时配置和 LLM API Key
+# Edit .env with runtime settings and LLM API key
 ```
 
 `.env` 配置项 / Configuration options:
 
 | 变量 / Variable | 说明 / Description | 默认值 / Default |
 |---|---|---|
-| `DB_HOST` | MySQL 主机 / MySQL host | `localhost` |
-| `DB_PORT` | MySQL 端口 / MySQL port | `3306` |
-| `DB_DATABASE` | 数据库名 / Database name | `paget` |
-| `DB_USERNAME` | 数据库用户 / Database user | `root` |
-| `DB_PASSWORD` | 数据库密码 / Database password | — |
 | `SERVER_PORT` | 后端端口 / Server port | `3000` |
 | `WS_PORT` | WebSocket 端口 / WebSocket port | `3001` |
 | `DEFAULT_LLM_BASE_URL` | LLM API 地址 / LLM API URL | `https://api.openai.com/v1` |
 | `DEFAULT_LLM_API_KEY` | LLM API 密钥 / LLM API key | — |
 | `DEFAULT_LLM_MODEL` | 默认模型 / Default model | `gpt-4o` |
+
+会话状态保存在进程内存中，服务重启后会丢失历史记录。
+Session state is kept in process memory, so history is cleared on restart.
+
+前端设置面板支持配置每次任务的 `maxSteps`，并在提交任务时透传到后端 Agent 循环。
+The frontend settings panel supports per-task `maxSteps`, which is forwarded to the backend agent loop on task submission.
 
 ### 开发 / Development
 

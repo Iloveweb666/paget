@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-Paget is an AI-powered web page automation agent built on a reflection-before-action architecture. It observes page state, reflects on progress, then executes batch actions — all orchestrated through a client-server model with WebSocket communication.
+Paget is an AI-powered web page automation agent built on a reflection-before-action architecture. It observes page state, reflects on progress, then executes batch actions — all orchestrated through a client-server model with WebSocket communication. Session state is kept in memory; the current setup uses no external storage.
 
 ## Monorepo Structure
 
@@ -11,7 +11,7 @@ packages/
 ├── shared/           # Shared types & constants (frontend + backend)
 ├── page-controller/  # DOM extraction & element interaction (runs in browser)
 ├── ui/               # Vue 3 chat UI (entry point + user config)
-└── server/           # NestJS backend (LLM, Agent, Prompt, Session, WebSocket)
+└── server/           # NestJS backend (LLM, Agent, Prompt, in-memory Session, WebSocket)
 ```
 
 ## Tech Stack
@@ -19,8 +19,7 @@ packages/
 | Layer | Technology |
 |-------|-----------|
 | Frontend | Vue 3 + TypeScript + Vite + Pinia |
-| Backend | NestJS + TypeORM + LangChain.js |
-| Database | MySQL |
+| Backend | NestJS + LangChain.js |
 | Realtime | Socket.IO (WebSocket) |
 | Monorepo | pnpm workspace |
 
@@ -37,8 +36,8 @@ Every agent step outputs:
 ### Event Model (3 categories)
 
 - **statuschange** — agent lifecycle: `idle → running → completed/error`
-- **historychange** — persistent events (steps, observations, errors) used as LLM context
-- **activity** — transient UI feedback (thinking, executing, executed) NOT sent to LLM
+- **historychange** — session-state events (steps, observations, errors) used as LLM context
+- **activity** — transient UI feedback (thinking, executing, executed) NOT stored in session history or sent to LLM
 
 ### Data Flow
 
@@ -46,7 +45,7 @@ Every agent step outputs:
 Browser (UI + PageController)  ←— WebSocket —→  Server (Agent + LLM)
   - Reports page state (DOM)                      - Runs reflection loop
   - Executes batch actions                        - Calls LLM via LangChain
-  - Displays events in ChatPanel                  - Persists history to MySQL
+  - Displays events in ChatPanel                  - Stores history in in-memory session state
 ```
 
 ## Coding Conventions
@@ -97,7 +96,7 @@ Browser (UI + PageController)  ←— WebSocket —→  Server (Agent + LLM)
 ### NestJS (packages/server)
 
 - One module per domain: `llm`, `agent`, `prompt`, `session`
-- Entity files: `*.entity.ts` with TypeORM decorators
+- Session data is stored in memory; there is no external storage layer
 - DTOs: `dto/*.dto.ts` with class-validator decorators
 - Services contain business logic; Controllers are thin (delegate to services)
 - WebSocket events defined in `@paget/shared` constants, not magic strings
@@ -125,7 +124,6 @@ Browser (UI + PageController)  ←— WebSocket —→  Server (Agent + LLM)
 | Composable | camelCase.ts | `useWebSocket.ts` |
 | Pinia store | camelCase.ts | `chat.ts` |
 | NestJS module | kebab-case.*.ts | `llm.module.ts` |
-| NestJS entity | kebab-case.entity.ts | `llm.entity.ts` |
 | Shared types | camelCase.ts | `agent.ts` |
 | CSS | kebab-case.css | `variables.css` |
 
@@ -165,5 +163,6 @@ pnpm build:shared    # Build shared package only
 
 - The `page-controller` package runs **in the browser** (injected into target pages), not on the server
 - The server never directly manipulates DOM — it sends action commands via WebSocket, and the client-side PageController executes them
-- LLM API keys are stored in MySQL, never hardcoded or committed to git
+- LLM API keys come from environment variables, never hardcoded or committed to git
+- Server session state is in-memory only, so it resets when the process restarts
 - The `.env` file is gitignored; use `.env.example` as template

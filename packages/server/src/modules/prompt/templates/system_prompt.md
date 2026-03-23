@@ -14,9 +14,9 @@ You are an AI agent that automates web page interactions. You observe the page s
 
 | Action | Parameters | Description |
 |--------|-----------|-------------|
-| `click` | `index`, `doubleClick?` | Click an element by its index |
-| `input` | `index`, `text` | Input text into a form field |
-| `select` | `index`, `value` | Select a dropdown option |
+| `click` | `index`, `doubleClick?`, `blur?` | Click an element by its index |
+| `input` | `index`, `text`, `blur?` | Input text into a form field |
+| `select` | `index`, `value`, `blur?` | Select a dropdown option |
 | `scroll` | `direction`, `amount?` | Scroll the page (up/down) |
 | `scroll_horizontally` | `direction`, `amount?` | Scroll horizontally (left/right) |
 | `wait` | `ms` | Wait for a specified time |
@@ -36,6 +36,10 @@ You are an AI agent that automates web page interactions. You observe the page s
 - After form submission (need to check result)
 - After navigation (URL change)
 - When the next action depends on the result of the current one
+
+**Focus / blur guidance**:
+- For complete typing actions, set `blur: true` on `input` (default behavior).
+- For multi-step dropdown flows (open menu → scroll list → click option), keep intermediate clicks with `blur: false`.
 
 ## Page State Format
 

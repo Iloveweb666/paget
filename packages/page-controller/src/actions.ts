@@ -68,16 +68,15 @@ function blurLastClickedElement(): void {
 }
 
 /**
- * 模拟完整的点击事件链
- * Simulate a full click event chain
- *
- * 事件顺序 / Event sequence:
- * blur previous → scrollIntoView → movePointer → mouseenter → mouseover
- * → mousedown → focus → mouseup → click → wait
+ * 模拟完整点击，可选在动作结束后失焦
+ * Simulate a full click, optionally blur after completion
  */
-export async function clickElement(element: HTMLElement): Promise<void> {
-  // 清理上一个被点击元素的状态 / Clean up previous clicked element
-  blurLastClickedElement();
+export async function clickElement(
+  element: HTMLElement,
+  options: { blurAfter?: boolean } = {},
+): Promise<void> {
+  // 不在点击前强制失焦：避免下拉菜单在“展开后点选项”场景被提前收起
+  // Do not force blur before click: avoids collapsing dropdowns between two-step clicks
   lastClickedElement = element;
 
   // 确保元素在视口内 / Ensure element is in viewport
@@ -112,6 +111,11 @@ export async function clickElement(element: HTMLElement): Promise<void> {
 
   // 等待确保点击事件处理完成 / Wait for click event processing
   await waitFor(0.2);
+
+  // 按需在点击后失焦 / Blur after click when requested
+  if (options.blurAfter) {
+    blurLastClickedElement();
+  }
 }
 
 // 原生 value setter，绕过框架代理（React/Vue）/ Native value setters to bypass framework proxies
@@ -138,6 +142,7 @@ const nativeTextAreaValueSetter = Object.getOwnPropertyDescriptor(
 export async function inputText(
   element: HTMLElement,
   text: string,
+  options: { blurAfter?: boolean } = {},
 ): Promise<void> {
   const isContentEditable = element.isContentEditable;
 
@@ -150,7 +155,7 @@ export async function inputText(
   }
 
   // 先点击元素使其获得焦点 / Click element first to focus it
-  await clickElement(element);
+  await clickElement(element, { blurAfter: false });
 
   if (isContentEditable) {
     // Contenteditable 支持（部分）/ Contenteditable support (partial)
@@ -220,8 +225,10 @@ export async function inputText(
 
   await waitFor(0.1);
 
-  // 清理焦点状态 / Clean up focus
-  blurLastClickedElement();
+  // 输入动作默认在完成后失焦，可由参数覆盖 / Input blurs by default after completion, overridable
+  if (options.blurAfter ?? true) {
+    blurLastClickedElement();
+  }
 }
 
 /**
@@ -231,13 +238,14 @@ export async function inputText(
 export async function selectOption(
   element: HTMLSelectElement,
   optionText: string,
+  control: { blurAfter?: boolean } = {},
 ): Promise<void> {
   if (!(element instanceof HTMLSelectElement)) {
     throw new Error("Element is not a select element");
   }
 
-  const options = Array.from(element.options);
-  const option = options.find(
+  const selectOptions = Array.from(element.options);
+  const option = selectOptions.find(
     (opt) => opt.textContent?.trim() === optionText.trim(),
   );
 
@@ -247,10 +255,70 @@ export async function selectOption(
     );
   }
 
+  // 记录当前元素，便于统一失焦清理 / Track current element for blur cleanup
+  lastClickedElement = element;
+  element.focus();
   element.value = option.value;
   element.dispatchEvent(new Event("change", { bubbles: true }));
 
   await waitFor(0.1);
+
+  // Select 默认在完成后失焦，可由参数覆盖 / Select blurs by default after completion, overridable
+  if (control.blurAfter ?? true) {
+    blurLastClickedElement();
+  }
+}
+
+/**
+ * 读取 blur 参数（仅接受布尔值）
+ * Read blur param (boolean only)
+ */
+function readBlurParam(params: Record<string, unknown>): boolean | undefined {
+  return typeof params.blur === "boolean" ? params.blur : undefined;
+}
+
+/**
+ * 判断元素是否是下拉相关控件（原生 select / ARIA combobox / 常见类名）
+ * Detect dropdown-related controls (native select / ARIA combobox / common class names)
+ */
+function isLikelyDropdownElement(element: HTMLElement): boolean {
+  if (element instanceof HTMLSelectElement) return true;
+
+  const role = element.getAttribute("role")?.toLowerCase();
+  if (role && ["combobox", "listbox", "option"].includes(role)) return true;
+
+  const ariaHasPopup = element.getAttribute("aria-haspopup")?.toLowerCase();
+  if (ariaHasPopup && ["listbox", "menu", "tree", "dialog"].includes(ariaHasPopup)) {
+    return true;
+  }
+
+  const key = `${element.className} ${element.id}`.toLowerCase();
+  return /(select|dropdown|combobox|option-list|menu-item)/.test(key);
+}
+
+/**
+ * 计算 click 动作是否应在结束后失焦
+ * Decide whether click should blur after completion
+ */
+function shouldBlurAfterClick(
+  element: HTMLElement,
+  params: Record<string, unknown>,
+  nextAction?: AgentAction,
+): boolean {
+  const explicit = readBlurParam(params);
+  if (explicit !== undefined) return explicit;
+
+  // 下拉交互默认不失焦，避免“展开后下一步点选项”被提前收起
+  // Keep focus for dropdown flows to avoid collapsing before option click
+  if (isLikelyDropdownElement(element)) return false;
+
+  // 若下一步紧接着还有交互，默认保持焦点连续性
+  // Keep focus continuity when another interactive action follows immediately
+  if (nextAction && ["click", "input", "select", "scroll", "scroll_horizontally"].includes(nextAction.tool)) {
+    return false;
+  }
+
+  return true;
 }
 
 /**
@@ -535,6 +603,7 @@ export async function scrollHorizontally(
 export async function executeAction(
   action: AgentAction,
   selectorMap: Map<number, Element>,
+  options: { nextAction?: AgentAction } = {},
 ): Promise<ActionResult> {
   try {
     const { tool, params } = action;
@@ -554,7 +623,8 @@ export async function executeAction(
       // 点击操作 / Click action
       case "click": {
         const el = getElement(params.index as number);
-        await clickElement(el);
+        const blurAfter = shouldBlurAfterClick(el, params, options.nextAction);
+        await clickElement(el, { blurAfter });
 
         // 处理新标签页链接 / Handle links that open in new tabs
         if (el instanceof HTMLAnchorElement && el.target === "_blank") {
@@ -574,7 +644,8 @@ export async function executeAction(
       // 输入操作 / Input action
       case "input": {
         const el = getElement(params.index as number);
-        await inputText(el, params.text as string);
+        const blurAfter = readBlurParam(params) ?? true;
+        await inputText(el, params.text as string, { blurAfter });
         return {
           action,
           success: true,
@@ -585,9 +656,11 @@ export async function executeAction(
       // 选择操作 / Select action
       case "select": {
         const el = getElement(params.index as number);
+        const blurAfter = readBlurParam(params) ?? true;
         await selectOption(
           el as HTMLSelectElement,
           (params.value || params.optionText) as string,
+          { blurAfter },
         );
         return {
           action,
@@ -622,10 +695,17 @@ export async function executeAction(
 
       // 等待操作 / Wait action
       case "wait": {
+        // 优先使用 ms，其次使用 seconds（转换为毫秒）/ Prefer ms, then seconds (converted to milliseconds)
+        const rawMs = params.ms as number | undefined;
+        const rawSeconds = params.seconds as number | undefined;
         const ms =
-          (params.ms as number) || (params.seconds as number)
-            ? (params.seconds as number) * 1000
-            : 1000;
+          typeof rawMs === "number" && Number.isFinite(rawMs) && rawMs >= 0
+            ? rawMs
+            : typeof rawSeconds === "number" &&
+                Number.isFinite(rawSeconds) &&
+                rawSeconds >= 0
+              ? rawSeconds * 1000
+              : 1000;
         await new Promise((resolve) => setTimeout(resolve, ms));
         return { action, success: true, output: `Waited ${ms}ms` };
       }
@@ -647,13 +727,29 @@ export async function executeAction(
         return {
           action,
           success: true,
-          output: (params.data as string) || "Task completed",
+          // 兼容 message（现行）与 data（历史）字段 / Support both message (current) and data (legacy)
+          output:
+            (params.message as string) ||
+            (params.data as string) ||
+            "Task completed",
+        };
+      }
+
+      // 向用户提问（当前版本仅透传，不阻塞流程）/ Ask user (pass-through for now, non-blocking)
+      case "ask_user": {
+        const question =
+          (params.question as string) || "Need user clarification";
+        return {
+          action,
+          success: true,
+          output: `Ask user: ${question}`,
         };
       }
 
       // 未知工具类型 / Unknown tool type
       default:
-        return { action, success: false, error: `Unknown tool: ${tool}` };
+        // 工具不匹配时兜底跳过，避免打断整批动作 / Skip unknown tools to avoid breaking the whole batch
+        return { action, success: true, output: `Skipped unknown tool: ${tool}` };
     }
   } catch (err) {
     return {
@@ -676,7 +772,9 @@ export async function executeBatch(
   const results: ActionResult[] = [];
 
   for (let i = 0; i < actions.length; i++) {
-    const result = await executeAction(actions[i], selectorMap);
+    const result = await executeAction(actions[i], selectorMap, {
+      nextAction: i < actions.length - 1 ? actions[i + 1] : undefined,
+    });
     results.push(result);
     onProgress?.(i, result);
 

@@ -5,8 +5,8 @@ import type { AgentStatus } from '../constants/status.js'
  * A single atomic action the agent can perform
  */
 export interface AgentAction {
-  // 工具名称：click, input, select, scroll, wait, done, ask_user, execute_javascript
-  // Tool name: click, input, select, scroll, wait, done, ask_user, execute_javascript
+  // 工具名称：click, input, select, scroll, scroll_horizontally, wait, done, ask_user, execute_javascript
+  // Tool name: click, input, select, scroll, scroll_horizontally, wait, done, ask_user, execute_javascript
   tool: string
   // 工具特定参数 / Tool-specific parameters
   params: Record<string, unknown>

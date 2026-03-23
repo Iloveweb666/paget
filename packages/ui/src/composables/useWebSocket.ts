@@ -14,6 +14,7 @@ import type {
   ActivityPayload,
   AgentAction,
   StreamChunkPayload,
+  TaskSubmitPayload,
 } from '@paget/shared'
 import { wsLogger } from './useWSLogger'
 
@@ -126,8 +127,7 @@ export function useWebSocket(urlOrPath = '/agent') {
   /**
    * 向 Agent 提交任务 / Submit a task to the agent
    */
-  function submitTask(task: string, sessionId: string) {
-    const payload = { task, sessionId }
+  function submitTask(payload: TaskSubmitPayload) {
     wsLogger.log('send', WS_EVENTS.TASK_SUBMIT, payload)
     socket.value?.emit(WS_EVENTS.TASK_SUBMIT, payload)
   }

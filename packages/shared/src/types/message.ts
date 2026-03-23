@@ -38,6 +38,8 @@ export interface TaskSubmitPayload {
   sessionId: string
   // 可选的 LLM 配置覆盖 / Optional LLM config override
   llmConfigId?: string
+  // 可选的最大步数覆盖 / Optional max steps override
+  maxSteps?: number
 }
 
 /**

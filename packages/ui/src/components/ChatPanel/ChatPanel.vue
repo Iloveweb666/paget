@@ -6,7 +6,7 @@
  * 整合 WebSocket 通信、Agent 状态管理、聊天消息和配置
  * Integrates WebSocket, agent state, chat messages, and config
  */
-import { ref, computed, onMounted } from "vue";
+import { ref, computed, onMounted, watch } from "vue";
 import { AgentStatus } from "@paget/shared";
 import {
   useWebSocket,
@@ -51,13 +51,20 @@ const {
 } = useWebSocket();
 
 // 页面控制器（DOM 状态提取 + 操作执行）/ Page controller (DOM extraction + action execution)
-const { getBrowserState, executeBatch, showMask, hideMask } = usePageController(
+const { getBrowserState, executeBatch, showMask, hideMask, setMaskEnabled } = usePageController(
   {
-    enableMask: true,
+    enableMask: config.value.showMask,
   },
 );
-
-// showMask();
+// 配置变化时动态切换遮罩能力 / Toggle mask behavior when config changes
+watch(
+  () => config.value.showMask,
+  (enabled) => {
+    setMaskEnabled(enabled);
+    if (!enabled) hideMask();
+  },
+  { immediate: true },
+);
 
 // Agent 状态管理 / Agent state management
 const {
@@ -86,12 +93,11 @@ onMounted(async () => {
   // Register event handlers first (stored in registry), then connect (auto-binds on connect)
   onStatusChange((payload) => {
     agentHandleStatus(payload);
-    chatStore.status = payload.status;
 
     // Agent 开始运行时显示遮罩层，结束时隐藏 / Show mask when agent starts, hide when done
     // streaming 状态不显示遮罩、不禁用输入 / streaming status: no mask, no input disable
     if (payload.status === AgentStatus.RUNNING) {
-      showMask();
+      if (config.value.showMask) showMask();
     } else if (
       payload.status === AgentStatus.IDLE ||
       payload.status === AgentStatus.COMPLETED ||
@@ -131,7 +137,13 @@ onMounted(async () => {
  */
 function handleSend() {
   const text = sendMessage();
-  if (text) submitTask(text, sessionId.value);
+  if (!text) return;
+  submitTask({
+    task: text,
+    sessionId: sessionId.value,
+    llmConfigId: config.value.llmConfigId || undefined,
+    maxSteps: config.value.maxSteps,
+  });
 }
 
 /**

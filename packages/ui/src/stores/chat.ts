@@ -73,8 +73,14 @@ export const useChatStore = defineStore("chat", () => {
   );
   // Agent 当前状态 / Agent current status
   const status = ref<AgentStatus>(AgentStatus.IDLE);
+  // 当前任务 ID / Current task ID
+  const taskId = ref<string | null>(null);
   // 当前活动指示（瞬态）/ Current activity indicator (transient)
   const activity = ref<ActivityPayload | null>(null);
+  // 输入框文本（可在多组件间共享）/ Input text shared across components
+  const inputText = ref("");
+  // 当前流式消息 ID / Current streaming message id
+  const streamingMessageId = ref<string | null>(null);
 
   // 持久化 sessionId / Persist sessionId
   watch(
@@ -111,8 +117,21 @@ export const useChatStore = defineStore("chat", () => {
     messages.value = [];
     history.value = [];
     status.value = AgentStatus.IDLE;
+    taskId.value = null;
     activity.value = null;
+    inputText.value = "";
+    streamingMessageId.value = null;
   }
 
-  return { sessionId, messages, history, status, activity, newSession };
+  return {
+    sessionId,
+    messages,
+    history,
+    status,
+    taskId,
+    activity,
+    inputText,
+    streamingMessageId,
+    newSession,
+  };
 });

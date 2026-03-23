@@ -23,12 +23,14 @@ Runs in the browser context, responsible for extracting page state and executing
 
 | 操作 / Action | 说明 / Description |
 |---|---|
-| `click` | 模拟点击（mouseover → mousedown → mouseup → click）|
-| `input` | 输入文本（focus → clear → setValue → input/change）|
-| `select` | 选择下拉选项 |
+| `click` | 模拟点击（支持 `blur` 参数控制是否在动作后失焦）|
+| `input` | 输入文本（默认完成后失焦，支持 `blur` 覆盖）|
+| `select` | 选择下拉选项（默认完成后失焦，支持 `blur` 覆盖） |
 | `scroll` | 垂直滚动 |
 | `scroll_horizontally` | 水平滚动 |
 | `wait` | 等待指定毫秒数 |
+| `done` | 完成当前任务（透传完成消息） |
+| `ask_user` | 向用户提问（当前仅透传，不阻塞流程） |
 | `execute_javascript` | 执行任意 JavaScript |
 
 ### 框架适配 / Framework Patches
@@ -45,7 +47,7 @@ Runs in the browser context, responsible for extracting page state and executing
 
 - 纯 TypeScript，核心代码无框架依赖 / Pure TypeScript, no framework dependency in core
 - 无 Node.js API，仅浏览器环境 / No Node.js APIs, browser context only
-- 批量执行遇错即停，返回部分结果 / Batch execution fails fast, returns partial results
+- 批量执行默认遇错即停，未知工具会自动跳过 / Batch execution fails fast by default, unknown tools are skipped
 - DOM 提取性能 < 100ms / DOM extraction < 100ms for typical pages
 - 兼容 Chrome 90+、Firefox 90+、Safari 15+ / Compatible with modern browsers
 

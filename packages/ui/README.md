@@ -25,8 +25,10 @@ The user-facing entry module of Paget. Provides floating action button (FAB), ch
 ### 设置面板 / Settings Panel
 
 - 语言切换（zh-CN / en-US）/ Language toggle
+- 最大步数配置（maxSteps）/ Max step configuration (maxSteps)
 - 遮罩层、暗色模式、通知、自动翻译等开关 / Mask, dark mode, notification, auto-translate toggles
 - 草稿-保存模式（编辑临时副本，保存时应用）/ Draft-then-save pattern
+- UI 包不再提供 LLM / Agent 配置 API 面板 / The UI package no longer exposes LLM / Agent configuration API panels
 
 ## 组件结构 / Component Structure
 
@@ -62,6 +64,7 @@ src/
 - 不使用第三方 UI 库 / No third-party UI library
 - 所有用户可见文本需添加 i18n 条目 / All user-visible strings need i18n entries
 - Composable 封装有状态逻辑，组件专注渲染 / Composables for stateful logic, components for rendering
+- 聊天与配置状态统一由 Pinia Store 管理并持久化 / Chat and config state are unified in Pinia stores with persistence
 
 ## 开发 / Development
 

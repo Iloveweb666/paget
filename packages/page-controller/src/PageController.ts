@@ -95,6 +95,18 @@ export class PageController extends EventTarget {
     this.mask = new SimulatorMask()
   }
 
+  /**
+   * 动态设置是否启用遮罩层 / Dynamically enable or disable mask support
+   */
+  setMaskEnabled(enabled: boolean): void {
+    this.enableMask = enabled
+    if (enabled) {
+      this.initMask()
+      return
+    }
+    this.mask?.hide()
+  }
+
   // ======= 状态查询 / State Queries =======
 
   /**
@@ -402,6 +414,7 @@ export class PageController extends EventTarget {
    * 显示自动化遮罩层 / Show the automation mask
    */
   showMask(): void {
+    if (!this.enableMask) return
     if (!this.mask) this.initMask()
     this.mask?.show()
   }
