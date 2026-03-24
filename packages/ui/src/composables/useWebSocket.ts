@@ -32,11 +32,16 @@ export function useWebSocket(urlOrPath = '/agent') {
   const bookmarkletConfig = inject<PagetBookmarkletConfig | null>('pagetConfig', null)
 
   // 计算最终的 WebSocket URL / Calculate final WebSocket URL
+  // Socket.IO 需要 http/https 协议（它内部自行升级到 WebSocket）
+  // Socket.IO requires http/https protocol (it upgrades to WebSocket internally)
   let url: string
   if (bookmarkletConfig?.serverUrl) {
     // Bookmarklet 模式：使用完整 URL / Bookmarklet mode: use full URL
-    // 例如：wss://paget.xyz + /agent → wss://paget.xyz/agent
-    const baseUrl = bookmarkletConfig.serverUrl.replace(/\/$/, '')
+    // 例如：http://localhost:3000 + /agent → http://localhost:3000/agent
+    const baseUrl = bookmarkletConfig.serverUrl
+      .replace(/\/$/, '')
+      .replace(/^ws:/, 'http:')
+      .replace(/^wss:/, 'https:')
     url = urlOrPath.startsWith('/') ? `${baseUrl}${urlOrPath}` : `${baseUrl}/${urlOrPath}`
   } else {
     // 普通模式：使用相对路径 / Normal mode: use relative path

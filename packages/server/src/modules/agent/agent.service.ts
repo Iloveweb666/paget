@@ -175,6 +175,7 @@ export class AgentService {
         // 1. OBSERVE（观察）— 获取页面状态 / Get page state
         ctx.emitActivity({ type: 'thinking' });
         const pageState = await ctx.getPageState();
+        if (aborted) break;
 
         // 2. THINK（思考）— 调用 LLM 进行推理 / Call LLM for inference
         const stepOutput = await executeAgentStep(model, this.toolRegistry, {
@@ -185,8 +186,36 @@ export class AgentService {
           stepNumber,
           maxSteps,
         });
+        if (aborted) break;
 
         // 3. ACT（行动）— 将批量操作发送到客户端 / Send batch actions to client
+        // 如果包含 done 工具则跳过执行，直接完成 / Skip execution if done tool is present, complete directly
+        const hasDone = stepOutput.actions.some((a) => a.tool === 'done');
+        if (hasDone) {
+          // 记录最终步骤到历史 / Record final step to history
+          const doneEvent = {
+            type: 'step' as const,
+            stepNumber,
+            reflection: {
+              evaluation_previous_goal: stepOutput.evaluation_previous_goal,
+              memory: stepOutput.memory,
+              next_goal: stepOutput.next_goal,
+            },
+            actions: stepOutput.actions,
+            results: stepOutput.actions.map((a) => ({
+              success: true,
+              output: a.tool === 'done' ? (a.params as any).message : 'skipped',
+            })),
+            usage: stepOutput.usage,
+            timestamp: Date.now(),
+          };
+          await this.sessionService.appendHistory(sessionId, doneEvent);
+          ctx.emitHistory(doneEvent);
+          await this.sessionService.updateStatus(sessionId, 'completed');
+          ctx.emitStatus('completed', 'Task completed successfully');
+          return;
+        }
+
         ctx.emitActivity({
           type: 'executing',
           actionIndex: 0,
@@ -194,6 +223,7 @@ export class AgentService {
         });
 
         const results = await ctx.executeBatchActions(stepOutput.actions);
+        if (aborted) break;
 
         ctx.emitActivity({
           type: 'executed',
@@ -230,15 +260,7 @@ export class AgentService {
         await this.sessionService.appendHistory(sessionId, stepEvent);
         ctx.emitHistory(stepEvent);
 
-        // 5. CHECK（检查）— 任务是否完成 / Is the task done?
-        const hasDone = stepOutput.actions.some((a) => a.tool === 'done');
-        if (hasDone) {
-          await this.sessionService.updateStatus(sessionId, 'completed');
-          ctx.emitStatus('completed', 'Task completed successfully');
-          return;
-        }
-
-        // 检查批量操作中是否有错误 / Check for errors in batch results
+        // 5. CHECK（检查）— 检查批量操作中是否有错误 / Check for errors in batch results
         const hasError = results.some((r) => !r.success);
         if (hasError) {
           // 记录错误观察，但继续循环（让 LLM 自我纠正） / Record observation about the error, but continue (let LLM self-correct)

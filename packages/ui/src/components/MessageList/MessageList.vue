@@ -3,12 +3,11 @@
  * 消息列表组件
  * Message list component
  *
- * 显示聊天气泡（AI/用户）、步骤卡片、思考中指示器
- * Displays chat bubbles (AI/user), step cards, and thinking indicator
+ * 显示聊天气泡（AI/用户）、历史事件、思考中指示器
+ * Displays chat bubbles (AI/user), history events, and thinking indicator
  */
 import type { ChatMessage, HistoryEvent, ActivityPayload } from '@paget/shared'
 import MessageItem from './MessageItem.vue'
-import StepCard from './StepCard.vue'
 import ActivityIndicator from './ActivityIndicator.vue'
 
 const props = defineProps<{
@@ -35,10 +34,9 @@ const listRef = defineModel<HTMLElement | null>('listRef')
       :is-streaming="msg.id === props.streamingMessageId"
     />
 
-    <!-- Agent 历史事件（步骤卡片、观察、错误）/ Agent history events -->
+    <!-- Agent 历史事件（观察、错误）/ Agent history events (observations, errors) -->
     <template v-for="(event, i) in history" :key="'h-' + i">
-      <StepCard v-if="event.type === 'step'" :step="event" />
-      <div v-else-if="event.type === 'observation'" class="message-list__observation">
+      <div v-if="event.type === 'observation'" class="message-list__observation">
         {{ event.message }}
       </div>
       <div v-else-if="event.type === 'error'" class="message-list__error">

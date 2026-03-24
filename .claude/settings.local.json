@@ -16,7 +16,9 @@
       "Bash(npx npm-cli-login -u maybe9527 -p tzj974895npm -e 2451499480@qq.com -r https://registry.npmjs.org)",
       "Bash(npm publish:*)",
       "WebFetch(domain:cdn.jsdelivr.net)",
-      "Bash(curl:*)"
+      "Bash(curl:*)",
+      "Bash(cd D:/adminWorkspace/paget/packages/shared && rm -rf dist && pnpm build 2>&1)",
+      "Bash(cd D:/adminWorkspace/paget/packages/shared && rm -f tsconfig.tsbuildinfo && pnpm build 2>&1 && ls dist/types/message.d.ts 2>&1)"
     ]
   }
 }

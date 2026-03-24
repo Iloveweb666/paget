@@ -77,11 +77,21 @@ export class PageController extends EventTarget {
   private mask: SimulatorMask | null = null
   private enableMask: boolean
 
+  /**
+   * 默认排除选择器：跳过 Paget 自身注入的 UI 元素和遮罩层
+   * Default exclude selector: skip Paget's own injected UI elements and mask
+   */
+  private static readonly DEFAULT_EXCLUDE = '[data-paget-ignore], #paget-root'
+
   constructor(config: PageControllerConfig = {}) {
     super()
 
     this.root = config.root || document.body
-    this.domConfig = config.domConfig || {}
+    this.domConfig = {
+      ...config.domConfig,
+      excludeSelector: config.domConfig?.excludeSelector
+        ?? PageController.DEFAULT_EXCLUDE,
+    }
     this.enableMask = config.enableMask ?? false
 
     if (this.enableMask) this.initMask()
@@ -176,7 +186,7 @@ export class PageController extends EventTarget {
 
     this.flatTree = getFlatTree(this.root, this.domConfig)
     this.simplifiedHTML = flatTreeToString(this.flatTree)
-    this.selectorMap = getSelectorMap(this.root, this.flatTree)
+    this.selectorMap = getSelectorMap(this.root, this.flatTree, this.domConfig)
 
     // 构建元素文本映射 / Build element text map
     this.elementTextMap.clear()

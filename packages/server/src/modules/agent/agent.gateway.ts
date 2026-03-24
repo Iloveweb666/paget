@@ -22,7 +22,10 @@ import { WS_EVENTS } from '@paget/shared';
 import { AgentService } from './agent.service';
 import { classifyIntent } from './chain/intent-classifier';
 
-@WebSocketGateway({ namespace: '/agent', cors: { origin: '*' } })
+@WebSocketGateway({
+  namespace: '/agent',
+  cors: { origin: true, credentials: true },
+})
 export class AgentGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @WebSocketServer()
   server!: Server;
@@ -36,8 +39,8 @@ export class AgentGateway implements OnGatewayConnection, OnGatewayDisconnect {
    * When the agent loop needs data from the client, it sets a resolver here
    * and the gateway resolves it when the client responds.
    */
-  private pageStateResolvers = new Map<string, (state: any) => void>();
-  private batchResultResolvers = new Map<string, (results: any) => void>();
+  private pageStateResolvers = new Map<string, { resolve: (state: any) => void; reject: (err: Error) => void }>();
+  private batchResultResolvers = new Map<string, { resolve: (results: any) => void; reject: (err: Error) => void }>();
 
   /**
    * Socket ID → Session ID 映射，用于断连时清理运行中的任务
@@ -61,9 +64,18 @@ export class AgentGateway implements OnGatewayConnection, OnGatewayDisconnect {
     if (sessionId) {
       // 取消运行中的任务 / Cancel running task
       this.agentService.cancel(sessionId);
-      // 清理等待中的 resolver（让服务端 Promise 超时或拒绝）/ Clean up pending resolvers
-      this.pageStateResolvers.delete(sessionId);
-      this.batchResultResolvers.delete(sessionId);
+      // Reject 等待中的 Promise 让 agent 循环立即退出 / Reject pending Promises so the agent loop exits immediately
+      const abortError = new Error('Client disconnected');
+      const pageResolver = this.pageStateResolvers.get(sessionId);
+      if (pageResolver) {
+        pageResolver.reject(abortError);
+        this.pageStateResolvers.delete(sessionId);
+      }
+      const batchResolver = this.batchResultResolvers.get(sessionId);
+      if (batchResolver) {
+        batchResolver.reject(abortError);
+        this.batchResultResolvers.delete(sessionId);
+      }
       this.clientSessionMap.delete(client.id);
       this.logger.log(`Cleaned up session ${sessionId} for disconnected client ${client.id}`);
     }
@@ -177,7 +189,7 @@ export class AgentGateway implements OnGatewayConnection, OnGatewayDisconnect {
   ) {
     const resolver = this.pageStateResolvers.get(data.sessionId);
     if (resolver) {
-      resolver({ header: data.header, content: data.content, footer: data.footer });
+      resolver.resolve({ header: data.header, content: data.content, footer: data.footer });
       this.pageStateResolvers.delete(data.sessionId);
     }
   }
@@ -189,7 +201,7 @@ export class AgentGateway implements OnGatewayConnection, OnGatewayDisconnect {
   ) {
     const resolver = this.batchResultResolvers.get(data.sessionId);
     if (resolver) {
-      resolver(data.results);
+      resolver.resolve(data.results);
       this.batchResultResolvers.delete(data.sessionId);
     }
   }
@@ -209,10 +221,16 @@ export class AgentGateway implements OnGatewayConnection, OnGatewayDisconnect {
         reject(new Error('Page state request timed out'));
       }, 30000);
 
-      // 注册解析器，等待客户端响应 / Register resolver, wait for client response
-      this.pageStateResolvers.set(sessionId, (state) => {
-        clearTimeout(timeout);
-        resolve(state);
+      // 注册解析器（含 reject），等待客户端响应或断连清理 / Register resolver (with reject), wait for response or disconnect cleanup
+      this.pageStateResolvers.set(sessionId, {
+        resolve: (state) => {
+          clearTimeout(timeout);
+          resolve(state);
+        },
+        reject: (err) => {
+          clearTimeout(timeout);
+          reject(err);
+        },
       });
 
       // 向客户端发送获取页面状态的请求 / Send page state request to client
@@ -236,10 +254,16 @@ export class AgentGateway implements OnGatewayConnection, OnGatewayDisconnect {
         reject(new Error('Batch action request timed out'));
       }, 60000);
 
-      // 注册解析器，等待客户端返回批量操作结果 / Register resolver, wait for client to return batch results
-      this.batchResultResolvers.set(sessionId, (results) => {
-        clearTimeout(timeout);
-        resolve(results);
+      // 注册解析器（含 reject），等待客户端返回结果或断连清理 / Register resolver (with reject), wait for results or disconnect cleanup
+      this.batchResultResolvers.set(sessionId, {
+        resolve: (results) => {
+          clearTimeout(timeout);
+          resolve(results);
+        },
+        reject: (err) => {
+          clearTimeout(timeout);
+          reject(err);
+        },
       });
 
       // 向客户端发送批量操作指令 / Send batch action commands to client

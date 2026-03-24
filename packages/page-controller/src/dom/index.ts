@@ -13,6 +13,11 @@ export interface DomExtractionConfig {
   includeHidden?: boolean
   /** 交互元素的自定义选择器 / Custom selector for interactive elements */
   interactiveSelector?: string
+  /**
+   * 要排除的元素 CSS 选择器（匹配的元素及其子树会被跳过）
+   * CSS selector for elements to exclude (matching elements and their subtrees are skipped)
+   */
+  excludeSelector?: string
 }
 
 // TODO: 使用 MutationObserver 实现增量 DOM 扫描优化 / Incremental DOM scan via MutationObserver
@@ -44,7 +49,7 @@ export function getFlatTree(
   root: Element = document.body,
   config: DomExtractionConfig = {},
 ): FlatDomNode[] {
-  const { maxDepth = 50, includeHidden = false } = config
+  const { maxDepth = 50, includeHidden = false, excludeSelector } = config
   const nodes: FlatDomNode[] = []
   let index = 0
 
@@ -52,6 +57,9 @@ export function getFlatTree(
   function walk(element: Element, depth: number) {
     // 超过最大深度则停止 / Stop if max depth exceeded
     if (depth > maxDepth) return
+
+    // 跳过排除的元素及其子树 / Skip excluded elements and their subtrees
+    if (excludeSelector && element.matches(excludeSelector)) return
 
     // 检查元素可见性 / Check element visibility
     const style = window.getComputedStyle(element)
@@ -121,8 +129,10 @@ export function flatTreeToString(nodes: FlatDomNode[]): string {
 export function getSelectorMap(
   root: Element = document.body,
   nodes: FlatDomNode[],
+  config: DomExtractionConfig = {},
 ): Map<number, Element> {
   const map = new Map<number, Element>()
+  const { excludeSelector } = config
   // 过滤出交互节点 / Filter interactive nodes only
   const interactiveNodes = nodes.filter(
     (n): n is InteractiveElementDomNode => n.type === 'interactive',
@@ -134,6 +144,8 @@ export function getSelectorMap(
 
   for (const el of allElements) {
     if (nodeIdx >= interactiveNodes.length) break
+    // 跳过排除的元素 / Skip excluded elements
+    if (excludeSelector && el.closest(excludeSelector)) continue
     if (isInteractive(el)) {
       map.set(interactiveNodes[nodeIdx].index, el)
       nodeIdx++

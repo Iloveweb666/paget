@@ -32,6 +32,7 @@ export class SimulatorMask {
 
     // 创建全屏遮罩层（带半透明底色和内边框）/ Create full-screen overlay with subtle background and inner border
     this.overlay = document.createElement("div");
+    this.overlay.setAttribute("data-paget-ignore", "");
     Object.assign(this.overlay.style, {
       position: "fixed",
       top: "0",
@@ -50,6 +51,7 @@ export class SimulatorMask {
 
     // 创建状态提示标签 / Create status indicator badge
     this.badge = document.createElement("div");
+    this.badge.setAttribute("data-paget-ignore", "");
     Object.assign(this.badge.style, {
       position: "fixed",
       top: "12px",
@@ -92,6 +94,7 @@ export class SimulatorMask {
 
     // 创建高亮框元素 / Create highlight box element
     this.highlight = document.createElement("div");
+    this.highlight.setAttribute("data-paget-ignore", "");
     Object.assign(this.highlight.style, {
       position: "fixed",
       zIndex: "99999",

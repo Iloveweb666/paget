@@ -21,6 +21,7 @@ import ChatFooter from "./ChatFooter.vue";
 import MessageList from "../MessageList/MessageList.vue";
 import ConfigPanel from "../ConfigPanel/ConfigPanel.vue";
 import WSLogPanel from "./WSLogPanel.vue";
+import BrowserStatePanel from "./BrowserStatePanel.vue";
 
 const emit = defineEmits<{ close: [] }>();
 
@@ -28,6 +29,8 @@ const emit = defineEmits<{ close: [] }>();
 const showSettings = ref(false);
 // 是否显示 WS 日志面板 / Whether to show WS log panel
 const showWSLog = ref(false);
+// 是否显示 BrowserState 面板 / Whether to show BrowserState panel
+const showBrowserState = ref(false);
 // 用户配置 / User configuration
 const { config } = useConfig();
 // 聊天 Store（共享 Agent 状态给 FAB）/ Chat store (shares agent status with FAB)
@@ -153,9 +156,11 @@ function handleSend() {
  */
 function handleStop() {
   wsForceStop(sessionId.value);
-  // 立即隐藏遮罩层并重置状态 / Immediately hide mask and reset status
+  // 立即隐藏遮罩层并重置所有运行态 / Immediately hide mask and reset all running state
   hideMask();
   chatStore.status = AgentStatus.IDLE;
+  chatStore.activity = null;
+  chatStore.streamingMessageId = null;
 }
 </script>
 
@@ -181,6 +186,7 @@ function handleStop() {
       @send="handleSend"
       @stop="handleStop"
       @open-settings="showSettings = true"
+      @open-browser-state="showBrowserState = true"
     />
 
     <!-- 设置弹窗 / Settings modal -->
@@ -192,6 +198,13 @@ function handleStop() {
 
     <!-- WS 日志面板 / WS log panel -->
     <WSLogPanel v-if="showWSLog" @close="showWSLog = false" />
+
+    <!-- BrowserState 查看面板 / BrowserState viewer panel -->
+    <BrowserStatePanel
+      v-if="showBrowserState"
+      :fetch-state="getBrowserState"
+      @close="showBrowserState = false"
+    />
   </div>
 </template>
 
