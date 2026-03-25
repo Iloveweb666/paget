@@ -20,6 +20,8 @@ export interface AgentRunContext {
   task: string;            // 用户任务描述 / User task description
   llmConfigId?: string;    // 指定使用的 LLM 配置 ID / Specified LLM config ID to use
   maxSteps?: number;       // 最大步骤数限制 / Maximum step count limit
+  taskRunId?: string;      // 任务运行 ID，透传到所有历史事件 / Task run ID, propagated to all history events
+  language?: string;       // 用户语言偏好，写入系统提示词 / User language preference, injected into system prompt
   /**
    * 回调：从客户端获取当前页面状态
    * Callback to get current page state from the client
@@ -162,7 +164,11 @@ export class AgentService {
 
     // 获取 LLM 模型实例和系统提示词 / Get LLM model instance and system prompt
     const model = await this.llmService.getChatModel();
-    const systemPrompt = await this.promptService.getSystemPrompt();
+    // 构建语言指令（写入提示词末尾）/ Build language instruction (appended to system prompt)
+    const languageInstruction = ctx.language
+      ? `IMPORTANT: You MUST respond in ${ctx.language}. All your reflection text (evaluation_previous_goal, memory, next_goal) and done messages must be written in ${ctx.language}.`
+      : '';
+    const systemPrompt = await this.promptService.getSystemPrompt({ languageInstruction });
 
     // 步骤历史记录（与 AgentChainInput.history 对齐）/ Step history (aligned with AgentChainInput.history)
     const history: AgentChainInput['history'] = [];
@@ -208,6 +214,7 @@ export class AgentService {
             })),
             usage: stepOutput.usage,
             timestamp: Date.now(),
+            taskRunId: ctx.taskRunId,
           };
           await this.sessionService.appendHistory(sessionId, doneEvent);
           ctx.emitHistory(doneEvent);
@@ -231,6 +238,10 @@ export class AgentService {
           actionTotal: stepOutput.actions.length,
         });
 
+        // 等待页面动画/渲染稳定（下拉菜单收起、路由过渡等）
+        // Wait for page animations/rendering to stabilize (dropdown close, route transitions, etc.)
+        await new Promise((resolve) => setTimeout(resolve, 500));
+
         // 4. RECORD（记录）— 将步骤持久化 / Persist step
         const stepEvent = {
           type: 'step' as const,
@@ -244,6 +255,7 @@ export class AgentService {
           results,
           usage: stepOutput.usage,
           timestamp: Date.now(),
+          taskRunId: ctx.taskRunId,
         };
 
         // 存入完整步骤记录（reflection + actions + results）供后续 LLM 上下文使用
@@ -272,6 +284,7 @@ export class AgentService {
             type: 'observation' as const,
             message: `Action error: ${errorMsg}`,
             timestamp: Date.now(),
+            taskRunId: ctx.taskRunId,
           };
           await this.sessionService.appendHistory(sessionId, obs);
           ctx.emitHistory(obs);
@@ -290,6 +303,7 @@ export class AgentService {
         type: 'error' as const,
         message: err instanceof Error ? err.message : String(err),
         timestamp: Date.now(),
+        taskRunId: ctx.taskRunId,
       };
       await this.sessionService.appendHistory(sessionId, errorEvent);
       ctx.emitHistory(errorEvent);

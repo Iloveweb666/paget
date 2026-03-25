@@ -167,11 +167,20 @@ function isInteractive(element: Element): boolean {
 
   // 检查 ARIA 角色 / Check ARIA role
   const role = element.getAttribute('role')
-  const interactiveRoles = ['button', 'link', 'textbox', 'checkbox', 'radio', 'tab', 'menuitem']
+  const interactiveRoles = ['button', 'link', 'textbox', 'checkbox', 'radio', 'tab', 'menuitem', 'option']
   if (role && interactiveRoles.includes(role)) return true
 
   // 检查 onclick 属性或 tabindex / Check onclick attribute or tabindex
   if (element.getAttribute('onclick') || element.getAttribute('tabindex')) return true
+
+  // 检查 <li> 是否在下拉列表容器内（Element Plus / Element UI 系列组件）
+  // Check if <li> is inside a dropdown container (Element Plus / Element UI variants: el-*, eu-*)
+  if (tag === 'li') {
+    const dropdownParent = element.closest(
+      '[class*="select-dropdown"], [class*="select__popper"], [class*="dropdown-menu"], [role="listbox"]'
+    )
+    if (dropdownParent) return true
+  }
 
   return false
 }

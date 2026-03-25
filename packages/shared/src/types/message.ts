@@ -10,6 +10,8 @@ export interface ChatMessage {
   role: MessageRole
   content: string
   timestamp: number
+  // 关联的任务运行 ID（用于将步骤事件分组到对应的用户消息下）/ Associated task run ID (groups step events under the corresponding user message)
+  taskRunId?: string
 }
 
 /**
@@ -40,6 +42,10 @@ export interface TaskSubmitPayload {
   llmConfigId?: string
   // 可选的最大步数覆盖 / Optional max steps override
   maxSteps?: number
+  // 任务运行 ID，用于关联步骤事件与用户消息 / Task run ID to link step events to user messages
+  taskRunId?: string
+  // 用户语言偏好，写入 LLM 提示词 / User language preference, injected into LLM system prompt
+  language?: string
 }
 
 /**

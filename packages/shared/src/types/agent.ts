@@ -73,6 +73,8 @@ export interface AgentStepEvent {
   // LLM Token 用量 / LLM token usage
   usage?: TokenUsage
   timestamp: number
+  // 关联的任务运行 ID / Associated task run ID
+  taskRunId?: string
 }
 
 /**
@@ -83,6 +85,8 @@ export interface ObservationEvent {
   type: 'observation'
   message: string
   timestamp: number
+  // 关联的任务运行 ID / Associated task run ID
+  taskRunId?: string
 }
 
 /**
@@ -93,6 +97,8 @@ export interface ErrorEvent {
   type: 'error'
   message: string
   timestamp: number
+  // 关联的任务运行 ID / Associated task run ID
+  taskRunId?: string
 }
 
 // 所有历史事件类型的联合 / Union of all history event types

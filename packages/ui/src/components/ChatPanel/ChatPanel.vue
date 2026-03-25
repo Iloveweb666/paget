@@ -139,13 +139,15 @@ onMounted(async () => {
  * 发送消息并提交任务 / Send message and submit task
  */
 function handleSend() {
-  const text = sendMessage();
-  if (!text) return;
+  const msg = sendMessage();
+  if (!msg) return;
   submitTask({
-    task: text,
+    task: msg.content,
     sessionId: sessionId.value,
     llmConfigId: config.value.llmConfigId || undefined,
     maxSteps: config.value.maxSteps,
+    taskRunId: msg.taskRunId,
+    language: config.value.locale === 'zh-CN' ? '中文' : 'English',
   });
 }
 

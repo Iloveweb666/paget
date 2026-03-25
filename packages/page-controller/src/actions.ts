@@ -75,7 +75,29 @@ export async function clickElement(
   element: HTMLElement,
   options: { blurAfter?: boolean } = {},
 ): Promise<void> {
-  // 不在点击前强制失焦：避免下拉菜单在“展开后点选项”场景被提前收起
+  // 检测元素是否在弹出层（下拉菜单/选择器弹层）内部
+  // Detect if element is inside a popper/dropdown overlay
+  const isInsidePopper = element.closest(
+    "[class*=”select__popper”], [class*=”select-dropdown”], [class*=”dropdown-menu”], [role=”listbox”]",
+  );
+
+  // 弹出层内的元素使用简化点击：避免 focus() 导致父级 select 失焦从而关闭下拉
+  // Use simplified click for elements inside poppers: avoid focus() causing parent select blur which closes dropdown
+  if (isInsidePopper) {
+    element.dispatchEvent(
+      new MouseEvent("mousedown", { bubbles: true, cancelable: true }),
+    );
+    element.dispatchEvent(
+      new MouseEvent("mouseup", { bubbles: true, cancelable: true }),
+    );
+    element.dispatchEvent(
+      new MouseEvent("click", { bubbles: true, cancelable: true }),
+    );
+    await waitFor(0.3);
+    return;
+  }
+
+  // 不在点击前强制失焦：避免下拉菜单在”展开后点选项”场景被提前收起
   // Do not force blur before click: avoids collapsing dropdowns between two-step clicks
   lastClickedElement = element;
 
@@ -288,7 +310,10 @@ function isLikelyDropdownElement(element: HTMLElement): boolean {
   if (role && ["combobox", "listbox", "option"].includes(role)) return true;
 
   const ariaHasPopup = element.getAttribute("aria-haspopup")?.toLowerCase();
-  if (ariaHasPopup && ["listbox", "menu", "tree", "dialog"].includes(ariaHasPopup)) {
+  if (
+    ariaHasPopup &&
+    ["listbox", "menu", "tree", "dialog"].includes(ariaHasPopup)
+  ) {
     return true;
   }
 
@@ -314,7 +339,12 @@ function shouldBlurAfterClick(
 
   // 若下一步紧接着还有交互，默认保持焦点连续性
   // Keep focus continuity when another interactive action follows immediately
-  if (nextAction && ["click", "input", "select", "scroll", "scroll_horizontally"].includes(nextAction.tool)) {
+  if (
+    nextAction &&
+    ["click", "input", "select", "scroll", "scroll_horizontally"].includes(
+      nextAction.tool,
+    )
+  ) {
     return false;
   }
 
@@ -653,19 +683,21 @@ export async function executeAction(
         };
       }
 
-      // 选择操作 / Select action
+      // 选择操作（仅原生 <select>，自定义下拉由 LLM 通过两步 click 完成）
+      // Select action (native <select> only; custom dropdowns handled by LLM via two-step clicks)
       case "select": {
         const el = getElement(params.index as number);
+        const optionText = (params.value || params.optionText) as string;
         const blurAfter = readBlurParam(params) ?? true;
         await selectOption(
           el as HTMLSelectElement,
-          (params.value || params.optionText) as string,
+          optionText,
           { blurAfter },
         );
         return {
           action,
           success: true,
-          output: `Selected "${params.value || params.optionText}" in [${params.index}]`,
+          output: `Selected "${optionText}" in [${params.index}]`,
         };
       }
 
@@ -749,7 +781,11 @@ export async function executeAction(
       // 未知工具类型 / Unknown tool type
       default:
         // 工具不匹配时兜底跳过，避免打断整批动作 / Skip unknown tools to avoid breaking the whole batch
-        return { action, success: true, output: `Skipped unknown tool: ${tool}` };
+        return {
+          action,
+          success: true,
+          output: `Skipped unknown tool: ${tool}`,
+        };
     }
   } catch (err) {
     return {

@@ -32,12 +32,13 @@ export function useChat() {
   /**
    * 添加用户消息 / Add a user message
    */
-  function addUserMessage(content: string): ChatMessage {
+  function addUserMessage(content: string, taskRunId?: string): ChatMessage {
     const msg: ChatMessage = {
       id: generateUUID(),
       role: "user",
       content,
       timestamp: Date.now(),
+      ...(taskRunId ? { taskRunId } : {}),
     };
     messages.value.push(msg);
     scrollToBottom();
@@ -122,15 +123,16 @@ export function useChat() {
   }
 
   /**
-   * 处理发送消息（获取输入文本、清空输入框、添加用户消息）
-   * Handle sending a message (get input text, clear input, add user message)
+   * 处理发送消息（获取输入文本、清空输入框、添加用户消息，生成 taskRunId）
+   * Handle sending a message (get input text, clear input, add user message, generate taskRunId)
    */
-  function sendMessage(): string | null {
+  function sendMessage(): ChatMessage | null {
     const text = inputText.value.trim();
     if (!text) return null;
     inputText.value = "";
-    addUserMessage(text);
-    return text;
+    const taskRunId = generateUUID();
+    const msg = addUserMessage(text, taskRunId);
+    return msg;
   }
 
   return {

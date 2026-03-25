@@ -66,6 +66,12 @@ export default {
       footer: 'Footer (Below Viewport)',
     },
   },
+  stepPanel: {
+    completed: 'Completed {{count}} steps',
+    running: 'Running... ({{count}} steps)',
+    taskSummary: 'Task Summary',
+    formInputs: 'Form Inputs',
+  },
   settings: {
     title: 'Settings',
     language: 'Language',

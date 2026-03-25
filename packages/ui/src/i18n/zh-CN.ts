@@ -66,6 +66,12 @@ export default {
       footer: 'Footer（视口外内容）',
     },
   },
+  stepPanel: {
+    completed: '已完成 {{count}} 个步骤',
+    running: '执行中... ({{count}} 步)',
+    taskSummary: '任务总结',
+    formInputs: '表单输入',
+  },
   settings: {
     title: '全局设置',
     language: '语言 / Language',
