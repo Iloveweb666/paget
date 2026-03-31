@@ -25,7 +25,8 @@
       "Bash(cd D:/adminWorkspace/paget && pnpm install --force 2>&1)",
       "Bash(cd D:/adminWorkspace/paget && node -e \"try{require\\('concurrently'\\);console.log\\('found'\\)}catch{console.log\\('not found'\\)}\" 2>&1)",
       "Bash(taskkill:*)",
-      "Bash(cd D:/adminWorkspace/paget && CI=true pnpm install 2>&1)"
+      "Bash(cd D:/adminWorkspace/paget && CI=true pnpm install 2>&1)",
+      "Bash(find /d/adminWorkspace/paget/packages/page-controller/src -type f -name \"*.ts\" | xargs grep -l \"parse\\\\|fix\\\\|response\" 2>/dev/null)"
     ]
   }
 }

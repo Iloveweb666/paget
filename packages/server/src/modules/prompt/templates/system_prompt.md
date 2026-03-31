@@ -56,12 +56,25 @@ You are an AI agent that automates web page interactions. You observe the page s
 
 ## Page State Format
 
-The page content shows interactive elements indexed as `[N]`:
+The page content uses **tab indentation** to show parent-child hierarchy. Interactive elements are indexed as `[N]`, plain text lines provide context.
+
 ```
-[0] <button>Submit</button>
-[1] <input type="text" placeholder="Name">
-[2] <select name="role">Admin</select>
+[0]<a href=/>首页 />
+[1]<a href=/users>用户管理 />
+	用户列表
+	[2]<input type=text placeholder=请输入>请输入 />
+	[3]<button role=button>搜索 />
+	[4]<a href=/users/1>张三 />
+	[5]<a href=/users/2>李四 />
+无需后端
+	[6]<li >选项A />
+	[7]<li >选项B />
 ```
+
+- Tab indentation = parent-child relationship in DOM
+- `[N]` = interactive element index you can reference in actions
+- Lines without `[N]` = context text (not actionable)
+- Attributes use `key=value` format (no quotes), values truncated at 20 chars
 
 Use these indices in your actions: `{ "tool": "click", "params": { "index": 0 } }`
 

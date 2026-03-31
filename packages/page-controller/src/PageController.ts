@@ -192,7 +192,7 @@ export class PageController extends EventTarget {
     this.elementTextMap.clear()
     const lines = this.simplifiedHTML.split('\n')
     for (const line of lines) {
-      const match = line.match(/^\[(\d+)\]/)
+      const match = line.match(/\[(\d+)\]/)
       if (match) {
         this.elementTextMap.set(Number(match[1]), line)
       }

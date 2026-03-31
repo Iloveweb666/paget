@@ -11,6 +11,8 @@ export interface DomNode {
   isVisible: boolean
   // 边界矩形 / Bounding rect
   rect?: DomRect
+  // DOM 树深度（相对于根元素）/ DOM tree depth (relative to root)
+  depth?: number
 }
 
 /**

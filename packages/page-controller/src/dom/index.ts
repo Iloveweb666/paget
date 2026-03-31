@@ -1,4 +1,4 @@
-import type { FlatDomNode, InteractiveElementDomNode } from './dom_tree/types'
+import type { FlatDomNode, InteractiveElementDomNode, TextDomNode } from './dom_tree/types'
 
 export * from './dom_tree'
 
@@ -39,11 +39,39 @@ export interface DomExtractionConfig {
 //    Full page replacement (route navigation) still requires full scan, no extra benefit
 
 /**
+ * 用于标识元素的属性白名单（对齐 page-agent）
+ * Attribute whitelist for element identification (aligned with page-agent)
+ */
+const RELEVANT_ATTRIBUTES = [
+  'title', 'type', 'checked', 'name', 'role', 'value', 'placeholder',
+  'alt', 'aria-label', 'aria-expanded', 'data-state', 'aria-checked',
+  'id', 'for', 'href', 'target', 'aria-haspopup', 'aria-controls',
+  'aria-owns', 'contenteditable',
+]
+
+/**
+ * 获取元素自身的直接文本内容（不递归子元素）
+ * Get the element's own direct text content (non-recursive)
+ */
+function getOwnTextContent(element: Element): string {
+  let text = ''
+  for (const child of element.childNodes) {
+    // 只取直接文本子节点 / Only take direct text child nodes
+    if (child.nodeType === Node.TEXT_NODE) {
+      text += child.textContent || ''
+    }
+  }
+  return text.trim()
+}
+
+/**
  * 从 DOM 中提取交互元素和文本节点的扁平树。
  * 每个交互元素会被分配一个索引编号，供 LLM 引用。
+ * 非交互元素的直接文本会作为上下文文本节点输出（index=-1）。
  *
  * Extract a flat tree of interactive and text nodes from the DOM.
  * Each interactive element is assigned an index for LLM reference.
+ * Direct text of non-interactive elements is emitted as context text nodes (index=-1).
  */
 export function getFlatTree(
   root: Element = document.body,
@@ -53,8 +81,11 @@ export function getFlatTree(
   const nodes: FlatDomNode[] = []
   let index = 0
 
-  // 递归遍历 DOM 树 / Recursively walk the DOM tree
-  function walk(element: Element, depth: number) {
+  /**
+   * 递归遍历 DOM 树 / Recursively walk the DOM tree
+   * @param insideInteractive 是否在交互元素内部，避免文本重复 / Whether inside an interactive element to avoid text duplication
+   */
+  function walk(element: Element, depth: number, insideInteractive: boolean) {
     // 超过最大深度则停止 / Stop if max depth exceeded
     if (depth > maxDepth) return
 
@@ -71,13 +102,16 @@ export function getFlatTree(
     const rect = element.getBoundingClientRect()
     const isVisible = rect.width > 0 && rect.height > 0
 
+    const isThisInteractive = isInteractive(element)
+
     // 如果是交互元素，收集其信息 / If interactive, collect its info
-    if (isInteractive(element)) {
+    if (isThisInteractive) {
       const node: InteractiveElementDomNode = {
         type: 'interactive',
         index: index++,
         tagName: element.tagName.toLowerCase(),
         isVisible,
+        depth,
         rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
         attributes: getRelevantAttributes(element),
         ariaLabel: element.getAttribute('aria-label') || undefined,
@@ -88,36 +122,98 @@ export function getFlatTree(
         text: element.textContent?.trim().slice(0, 100) || undefined,
       }
       nodes.push(node)
+    } else if (!insideInteractive) {
+      // 非交互元素：收集直接文本作为上下文 / Non-interactive element: collect direct text as context
+      const ownText = getOwnTextContent(element)
+      if (ownText.length >= 2) {
+        const textNode: TextDomNode = {
+          type: 'text',
+          index: -1,
+          tagName: element.tagName.toLowerCase(),
+          isVisible,
+          depth,
+          text: ownText.slice(0, 100),
+        }
+        nodes.push(textNode)
+      }
     }
 
     // 递归处理子元素 / Recursively process child elements
     for (const child of element.children) {
-      walk(child, depth + 1)
+      walk(child, depth + 1, insideInteractive || isThisInteractive)
     }
   }
 
-  walk(root, 0)
+  walk(root, 0, false)
   return nodes
 }
 
 /**
- * 将扁平树转换为简化的 HTML 字符串，供 LLM 消费。
- * Convert flat tree to simplified HTML string for LLM consumption.
+ * 构建属性字符串：过滤 + 去重 + 截断
+ * Build attribute string: filter + deduplicate + truncate
+ */
+function buildAttributeString(node: InteractiveElementDomNode): string {
+  const parts: string[] = []
+  const seenValues = new Set<string>()
+  const text = node.text || ''
+
+  for (const [key, value] of Object.entries(node.attributes)) {
+    // role 与 tagName 相同时跳过 / Skip role if same as tagName
+    if (key === 'role' && value === node.tagName) continue
+
+    // 文本去重：aria-label / placeholder / title 与 text 相同时从属性中删除
+    // Text dedup: remove aria-label / placeholder / title from attrs if same as text
+    if ((key === 'aria-label' || key === 'placeholder' || key === 'title') && value === text) continue
+
+    // 属性值去重：同一节点内值相同（>5 字符）时删后出现的
+    // Value dedup within same node: skip duplicate values (>5 chars)
+    if (value.length > 5 && seenValues.has(value)) continue
+    if (value.length > 5) seenValues.add(value)
+
+    // 截断超长属性值 / Truncate long attribute values
+    const truncated = value.length > 20 ? value.slice(0, 20) + '...' : value
+    parts.push(`${key}=${truncated}`)
+  }
+
+  return parts.length > 0 ? ' ' + parts.join(' ') : ''
+}
+
+/**
+ * 选择显示文本：text > ariaLabel > placeholder
+ * Pick display label: text > ariaLabel > placeholder
+ */
+function pickLabel(node: InteractiveElementDomNode): string {
+  return node.text || node.ariaLabel || node.placeholder || ''
+}
+
+/**
+ * 将扁平树转换为层级化简化字符串，供 LLM 消费。
+ * 使用 tab 缩进表示层级关系，自闭合格式减少 token。
+ *
+ * Convert flat tree to hierarchical simplified string for LLM consumption.
+ * Uses tab indentation for hierarchy, self-closing format to reduce tokens.
  */
 export function flatTreeToString(nodes: FlatDomNode[]): string {
-  return nodes
-    .filter((n) => n.isVisible)
+  const visibleNodes = nodes.filter((n) => n.isVisible)
+  if (visibleNodes.length === 0) return ''
+
+  // 计算最小深度作为基准 / Calculate min depth as baseline
+  const minDepth = Math.min(...visibleNodes.map((n) => n.depth ?? 0))
+
+  return visibleNodes
     .map((node) => {
+      // 计算相对缩进，上限 5 级 / Calculate relative indent, capped at 5
+      const relativeDepth = Math.min((node.depth ?? 0) - minDepth, 5)
+      const indent = '\t'.repeat(relativeDepth)
+
       if (node.type === 'interactive') {
-        // 拼接属性字符串 / Build attribute string
-        const attrs = Object.entries(node.attributes)
-          .map(([k, v]) => `${k}="${v}"`)
-          .join(' ')
-        // 优先使用 aria-label，其次 placeholder，最后 text / Prefer aria-label, then placeholder, then text
-        const label = node.ariaLabel || node.placeholder || node.text || ''
-        return `[${node.index}] <${node.tagName} ${attrs}>${label}</${node.tagName}>`
+        const attrs = buildAttributeString(node)
+        const label = pickLabel(node)
+        return `${indent}[${node.index}]<${node.tagName}${attrs}>${label} />`
       }
-      return node.text
+
+      // 文本节点：直接输出缩进 + 文本 / Text node: output indent + text
+      return `${indent}${node.text}`
     })
     .join('\n')
 }
@@ -186,14 +282,12 @@ function isInteractive(element: Element): boolean {
 }
 
 /**
- * 提取用于标识元素的相关属性
- * Extract relevant attributes for identification
+ * 提取用于标识元素的相关属性（对齐 page-agent，去掉 class）
+ * Extract relevant attributes for identification (aligned with page-agent, no class)
  */
 function getRelevantAttributes(element: Element): Record<string, string> {
   const attrs: Record<string, string> = {}
-  // 只提取有助于标识的属性 / Only extract attributes useful for identification
-  const relevant = ['id', 'name', 'type', 'href', 'data-testid', 'class']
-  for (const name of relevant) {
+  for (const name of RELEVANT_ATTRIBUTES) {
     const value = element.getAttribute(name)
     if (value) attrs[name] = value
   }
