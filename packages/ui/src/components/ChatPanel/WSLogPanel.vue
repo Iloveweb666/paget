@@ -7,10 +7,14 @@
  * Overlays on ChatPanel, displays all WS send/receive event logs
  */
 import { ref, computed, onMounted } from 'vue'
+import { storeToRefs } from 'pinia'
 import { wsLogger, type WSLogEntry } from '@/composables/useWSLogger'
+import { useChatStore } from '@/stores/chat'
 import { t } from '@/i18n'
 
 const emit = defineEmits<{ close: [] }>()
+const chatStore = useChatStore()
+const { sessionId, messages, history, status, activity } = storeToRefs(chatStore)
 
 // 日志列表（响应式快照）/ Log list (reactive snapshot)
 const logs = ref<WSLogEntry[]>([])
@@ -25,6 +29,17 @@ const displayLogs = computed(() => {
   refreshKey.value // 依赖触发 / dependency trigger
   return [...logs.value].reverse()
 })
+
+const latestUserMessage = computed(() => {
+  for (let i = messages.value.length - 1; i >= 0; i--) {
+    if (messages.value[i].role === 'user') {
+      return messages.value[i]
+    }
+  }
+  return null
+})
+
+const canExportRecentConversation = computed(() => latestUserMessage.value !== null)
 
 onMounted(() => {
   refreshLogs()
@@ -76,6 +91,54 @@ function handleClear() {
  */
 async function handleExport() {
   const json = wsLogger.exportLogs()
+  await writeJsonToClipboard(json)
+}
+
+function buildRecentConversationExport(): Record<string, unknown> | null {
+  const userMessage = latestUserMessage.value
+  if (!userMessage) return null
+
+  const startIndex = messages.value.findIndex((message) => message.id === userMessage.id)
+  const taskRunId = userMessage.taskRunId
+  const submitLog = [...logs.value]
+    .reverse()
+    .find((entry) => {
+      if (entry.direction !== 'send' || entry.event !== 'task:submit') return false
+      const data = entry.data as { taskRunId?: unknown; sessionId?: unknown } | undefined
+      if (!data) return false
+      if (taskRunId && data.taskRunId === taskRunId) return true
+      return data.sessionId === sessionId.value && entry.timestamp >= userMessage.timestamp
+    })
+
+  const startTimestamp = submitLog?.timestamp ?? userMessage.timestamp
+  const conversationMessages =
+    startIndex >= 0 ? messages.value.slice(startIndex) : [userMessage]
+  const conversationHistory = taskRunId
+    ? history.value.filter((event) => event.taskRunId === taskRunId)
+    : history.value.filter((event) => event.timestamp >= startTimestamp)
+  const conversationLogs = logs.value.filter((entry) => entry.timestamp >= startTimestamp)
+
+  return {
+    exportedAt: Date.now(),
+    sessionId: sessionId.value,
+    taskRunId: taskRunId ?? null,
+    status: status.value,
+    activity: activity.value,
+    userMessage,
+    messages: conversationMessages,
+    history: conversationHistory,
+    wsLogs: conversationLogs,
+  }
+}
+
+async function handleExportRecentConversation() {
+  const payload = buildRecentConversationExport()
+  if (!payload) return
+  const json = JSON.stringify(payload, null, 2)
+  await writeJsonToClipboard(json)
+}
+
+async function writeJsonToClipboard(json: string) {
   try {
     await navigator.clipboard.writeText(json)
   } catch {
@@ -116,6 +179,20 @@ async function handleExport() {
             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
             <polyline points="7 10 12 15 17 10" />
             <line x1="12" y1="15" x2="12" y2="3" />
+          </svg>
+        </button>
+        <button
+          class="ws-log-panel__btn"
+          @click="handleExportRecentConversation"
+          :title="t('wsLog.exportRecentConversation')"
+          :disabled="!canExportRecentConversation"
+        >
+          <!-- 最近一次对话导出图标 / Recent conversation export icon -->
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M8 7h8" />
+            <path d="M8 11h5" />
+            <path d="M12 3H6a2 2 0 0 0-2 2v14l4-3h4a2 2 0 0 0 2-2V5a2 2 0 0 0-2-2Z" />
+            <path d="M16 8h2a2 2 0 0 1 2 2v11l-4-3h-2a2 2 0 0 1-2-2v-1" />
           </svg>
         </button>
         <button class="ws-log-panel__btn ws-log-panel__btn--close" @click="emit('close')">
@@ -216,6 +293,16 @@ async function handleExport() {
 .ws-log-panel__btn svg {
   width: 16px;
   height: 16px;
+}
+
+.ws-log-panel__btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.ws-log-panel__btn:disabled:hover {
+  color: var(--paget-text-secondary);
+  background: none;
 }
 
 .ws-log-panel__btn--close {

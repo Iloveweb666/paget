@@ -13,6 +13,14 @@ async function waitFor(seconds: number): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, seconds * 1000));
 }
 
+function isVisibleElement(element: Element | null): element is HTMLElement {
+  return (
+    !!element &&
+    element instanceof HTMLElement &&
+    element.getClientRects().length > 0
+  );
+}
+
 // ======= DOM 工具 / DOM utils =======
 
 /**
@@ -85,14 +93,18 @@ export async function clickElement(
   // Use simplified click for elements inside poppers: avoid focus() causing parent select blur which closes dropdown
   if (isInsidePopper) {
     element.dispatchEvent(
+      new MouseEvent("mouseenter", { bubbles: true, cancelable: true }),
+    );
+    element.dispatchEvent(
+      new MouseEvent("mouseover", { bubbles: true, cancelable: true }),
+    );
+    element.dispatchEvent(
       new MouseEvent("mousedown", { bubbles: true, cancelable: true }),
     );
     element.dispatchEvent(
       new MouseEvent("mouseup", { bubbles: true, cancelable: true }),
     );
-    element.dispatchEvent(
-      new MouseEvent("click", { bubbles: true, cancelable: true }),
-    );
+    element.click();
     await waitFor(0.3);
     return;
   }
@@ -133,6 +145,10 @@ export async function clickElement(
 
   // 等待确保点击事件处理完成 / Wait for click event processing
   await waitFor(0.2);
+
+  if (shouldRetryPopupTriggerClick(element) && !hasPopupOpened(element)) {
+    await retryPopupTriggerClick(element);
+  }
 
   // 按需在点击后失焦 / Blur after click when requested
   if (options.blurAfter) {
@@ -322,7 +338,152 @@ function isLikelyDropdownElement(element: HTMLElement): boolean {
 }
 
 /**
- * 计算 click 动作是否应在结束后失焦
+ * 判断元素是否是下拉面板中的具体选项，而不是触发器? * Determine whether the element is a concrete dropdown option rather than a trigger.
+ */
+function isDropdownOptionElement(element: HTMLElement): boolean {
+  const role = element.getAttribute("role")?.toLowerCase();
+  if (role === "option") return true;
+
+  if (element.tagName.toLowerCase() === "option") return true;
+
+  if (element.tagName.toLowerCase() === "li") {
+    const dropdownParent = element.closest(
+      '[class*="select-dropdown"], [class*="select__popper"], [class*="dropdown-menu"], [role="listbox"]',
+    );
+    if (dropdownParent) return true;
+  }
+
+  return false;
+}
+
+function isPopupTriggerElement(element: HTMLElement): boolean {
+  if (isDropdownOptionElement(element)) return false;
+  if (element instanceof HTMLSelectElement) return true;
+
+  const role = element.getAttribute("role")?.toLowerCase();
+  if (role === "combobox") return true;
+
+  const ariaHasPopup = element.getAttribute("aria-haspopup")?.toLowerCase();
+  return (
+    !!ariaHasPopup &&
+    ["listbox", "menu", "tree", "dialog"].includes(ariaHasPopup)
+  );
+}
+
+function isElementPlusPopupTrigger(element: HTMLElement): boolean {
+  return Boolean(
+    element.closest(
+      ".el-select, .el-select__wrapper, .el-date-editor, .el-picker, .el-input__wrapper",
+    ),
+  );
+}
+
+function shouldRetryPopupTriggerClick(element: HTMLElement): boolean {
+  return isPopupTriggerElement(element) && isElementPlusPopupTrigger(element);
+}
+
+function getPopupStateProbeTargets(element: HTMLElement): HTMLElement[] {
+  const targets: HTMLElement[] = [element];
+  const controlsId = element.getAttribute("aria-controls");
+  if (controlsId) {
+    const controlled = document.getElementById(controlsId);
+    if (controlled instanceof HTMLElement) {
+      targets.push(controlled);
+    }
+  }
+
+  const popupType = element.getAttribute("aria-haspopup")?.toLowerCase();
+  if (popupType === "listbox") {
+    for (const candidate of document.querySelectorAll(
+      '[role="listbox"], .el-select__popper, .el-select-dropdown',
+    )) {
+      if (candidate instanceof HTMLElement) {
+        targets.push(candidate);
+      }
+    }
+  }
+
+  if (popupType === "dialog") {
+    for (const candidate of document.querySelectorAll(
+      '.el-picker__popper, .el-date-picker__popper, .el-picker-panel, [role="dialog"]',
+    )) {
+      if (candidate instanceof HTMLElement) {
+        targets.push(candidate);
+      }
+    }
+  }
+
+  return targets;
+}
+
+function hasPopupOpened(element: HTMLElement): boolean {
+  const expanded = element.getAttribute("aria-expanded")?.toLowerCase();
+  if (expanded === "true") return true;
+
+  return getPopupStateProbeTargets(element).some((target) =>
+    isVisibleElement(target),
+  );
+}
+
+function getPopupTriggerCandidates(element: HTMLElement): HTMLElement[] {
+  const candidates = [
+    element,
+    element.closest(".el-input__wrapper"),
+    element.closest(".el-select__wrapper"),
+    element.closest(".el-select"),
+    element.closest(".el-date-editor"),
+    element.closest(".el-picker"),
+    element.parentElement,
+  ];
+
+  const seen = new Set<HTMLElement>();
+  const deduped: HTMLElement[] = [];
+  for (const candidate of candidates) {
+    if (!(candidate instanceof HTMLElement) || seen.has(candidate)) continue;
+    seen.add(candidate);
+    deduped.push(candidate);
+  }
+  return deduped;
+}
+
+async function retryPopupTriggerClick(element: HTMLElement): Promise<void> {
+  for (const candidate of getPopupTriggerCandidates(element)) {
+    candidate.dispatchEvent(
+      new MouseEvent("mouseenter", { bubbles: true, cancelable: true }),
+    );
+    candidate.dispatchEvent(
+      new MouseEvent("mouseover", { bubbles: true, cancelable: true }),
+    );
+    candidate.dispatchEvent(
+      new MouseEvent("mousedown", { bubbles: true, cancelable: true }),
+    );
+    candidate.focus?.();
+    candidate.dispatchEvent(
+      new MouseEvent("mouseup", { bubbles: true, cancelable: true }),
+    );
+    candidate.click();
+
+    await waitFor(0.15);
+    if (hasPopupOpened(element) || hasPopupOpened(candidate)) {
+      return;
+    }
+  }
+}
+
+/**
+ * 判断点击动作是否应该作为批次边界�? * Detect whether a click should end the current batch to preserve dropdown state.
+ */
+function shouldEndBatchAfterClick(
+  action: AgentAction,
+  element: HTMLElement,
+  nextAction?: AgentAction,
+): boolean {
+  if (action.tool !== "click" || !nextAction) return false;
+  return isLikelyDropdownElement(element);
+}
+
+/**
+ * 计算 click 动作是否应在结束后失�?
  * Decide whether click should blur after completion
  */
 function shouldBlurAfterClick(
@@ -689,11 +850,7 @@ export async function executeAction(
         const el = getElement(params.index as number);
         const optionText = (params.value || params.optionText) as string;
         const blurAfter = readBlurParam(params) ?? true;
-        await selectOption(
-          el as HTMLSelectElement,
-          optionText,
-          { blurAfter },
-        );
+        await selectOption(el as HTMLSelectElement, optionText, { blurAfter });
         return {
           action,
           success: true,
@@ -808,8 +965,10 @@ export async function executeBatch(
   const results: ActionResult[] = [];
 
   for (let i = 0; i < actions.length; i++) {
-    const result = await executeAction(actions[i], selectorMap, {
-      nextAction: i < actions.length - 1 ? actions[i + 1] : undefined,
+    const action = actions[i];
+    const nextAction = i < actions.length - 1 ? actions[i + 1] : undefined;
+    const result = await executeAction(action, selectorMap, {
+      nextAction,
     });
     results.push(result);
     onProgress?.(i, result);
@@ -817,7 +976,21 @@ export async function executeBatch(
     // 遇到错误立即停止 / Stop immediately on error
     if (!result.success) break;
 
-    // 操作之间加入短暂延迟以确保 DOM 稳定 / Small delay between actions for DOM stability
+    // 点击下拉触发器后立即结束当前批次，保留下拉面板供下一轮观察�?    // End the current batch right after opening a dropdown trigger so the next
+    // observation can still see the expanded options overlay.
+    if (action.tool === "click") {
+      const index = action.params.index as number | undefined;
+      const element =
+        typeof index === "number" ? selectorMap.get(index) : undefined;
+      if (
+        element instanceof HTMLElement &&
+        shouldEndBatchAfterClick(action, element, nextAction)
+      ) {
+        break;
+      }
+    }
+
+    // 操作之间加入短暂延迟以确�?DOM 稳定 / Small delay between actions for DOM stability
     if (i < actions.length - 1) {
       await new Promise((resolve) => setTimeout(resolve, 100));
     }

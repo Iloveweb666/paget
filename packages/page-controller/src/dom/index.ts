@@ -155,7 +155,7 @@ export function getFlatTree(
 function buildAttributeString(node: InteractiveElementDomNode): string {
   const parts: string[] = []
   const seenValues = new Set<string>()
-  const text = node.text || ''
+  const displayLabel = pickLabel(node)
 
   for (const [key, value] of Object.entries(node.attributes)) {
     // role 与 tagName 相同时跳过 / Skip role if same as tagName
@@ -163,7 +163,10 @@ function buildAttributeString(node: InteractiveElementDomNode): string {
 
     // 文本去重：aria-label / placeholder / title 与 text 相同时从属性中删除
     // Text dedup: remove aria-label / placeholder / title from attrs if same as text
-    if ((key === 'aria-label' || key === 'placeholder' || key === 'title') && value === text) continue
+    if (
+      (key === 'aria-label' || key === 'placeholder' || key === 'title' || key === 'value') &&
+      value === displayLabel
+    ) continue
 
     // 属性值去重：同一节点内值相同（>5 字符）时删后出现的
     // Value dedup within same node: skip duplicate values (>5 chars)
@@ -183,7 +186,7 @@ function buildAttributeString(node: InteractiveElementDomNode): string {
  * Pick display label: text > ariaLabel > placeholder
  */
 function pickLabel(node: InteractiveElementDomNode): string {
-  return node.text || node.ariaLabel || node.placeholder || ''
+  return node.text || node.value || node.ariaLabel || node.placeholder || ''
 }
 
 /**
@@ -288,7 +291,31 @@ function isInteractive(element: Element): boolean {
 function getRelevantAttributes(element: Element): Record<string, string> {
   const attrs: Record<string, string> = {}
   for (const name of RELEVANT_ATTRIBUTES) {
-    const value = element.getAttribute(name)
+    let value = element.getAttribute(name)
+
+    if (
+      name === 'value' &&
+      (
+        element instanceof HTMLInputElement ||
+        element instanceof HTMLTextAreaElement ||
+        element instanceof HTMLSelectElement
+      )
+    ) {
+      value = element.value || null
+    }
+
+    if (
+      name === 'checked' &&
+      element instanceof HTMLInputElement &&
+      (element.type === 'checkbox' || element.type === 'radio')
+    ) {
+      value = element.checked ? 'true' : null
+    }
+
+    if (name === 'aria-checked' && element instanceof HTMLInputElement) {
+      value = element.checked ? 'true' : value
+    }
+
     if (value) attrs[name] = value
   }
   return attrs

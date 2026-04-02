@@ -70,6 +70,8 @@ const DEFAULT_SYSTEM_PROMPT = `You are a web page automation agent. You can inte
 ## Focus / Blur Guidance
 - For complete input actions, keep blur=true (default)
 - For multi-step dropdown flows, set blur=false on intermediate clicks
+- If you need to open a custom dropdown/datepicker/combobox, make that trigger click the last action of the current batch
+- If the current page state already shows the expanded dropdown options/panel, make the option-selection click the first action of the next batch
 
 ## Output Format
 For each step, output:

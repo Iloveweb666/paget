@@ -39,11 +39,19 @@ src/
 │   ├── ChatPanel/                # 聊天对话框
 │   │   ├── ChatPanel.vue         # 主组件（整合 WS、Agent、Chat）
 │   │   ├── ChatHeader.vue        # 头部
-│   │   └── ChatFooter.vue        # 底部（工具栏 + 输入框）
+│   │   ├── ChatFooter.vue        # 底部（工具栏 + 输入框）
+│   │   ├── BrowserStatePanel.vue # 页面状态面板
+│   │   └── WSLogPanel.vue        # WS 日志面板
 │   ├── MessageList/              # 消息列表
 │   │   ├── MessageList.vue       # 列表容器
 │   │   ├── MessageItem.vue       # 单条消息
-│   │   └── ActivityIndicator.vue # 活动指示器
+│   │   ├── ActivityIndicator.vue # 活动指示器
+│   │   ├── StepCard.vue          # 单步执行卡片
+│   │   └── StepPanel.vue         # 步骤明细面板
+│   ├── common/                   # 通用渲染组件
+│   │   ├── MarkdownRenderer.vue  # Markdown 渲染
+│   │   ├── CodeBlock.vue         # 代码块渲染
+│   │   └── StatusBadge.vue       # 状态徽标
 │   └── ConfigPanel/              # 设置面板
 │       └── ConfigPanel.vue       # 设置弹窗
 ├── composables/                  # 组合式函数
@@ -51,20 +59,28 @@ src/
 │   ├── useAgent.ts               # Agent 状态管理
 │   ├── useChat.ts                # 聊天消息
 │   ├── useConfig.ts              # 用户配置
-│   └── useDrag.ts                # 拖拽行为
+│   ├── useDrag.ts                # 拖拽行为
+│   ├── usePageController.ts      # 页面控制器桥接
+│   ├── useWSLogger.ts            # WS 调试日志
+│   └── index.ts                  # composables 导出
+├── views/                        # 演示与嵌入入口页面
+│   ├── DemoView.vue
+│   ├── WidgetView.vue
+│   └── BookmarkletView.vue
 ├── stores/                       # Pinia 状态
 ├── styles/                       # CSS 设计令牌
-└── i18n/                         # 国际化
+├── i18n/                         # 国际化
+└── bookmarklet.ts                # 书签脚本入口
 ```
 
 ## 规则 / Rules
 
 - Composition API + `<script setup>` only
 - CSS 使用 `--paget-*` 自定义属性 / CSS uses `--paget-*` custom properties
-- 不使用第三方 UI 库 / No third-party UI library
+- 生产聊天组件避免重 UI 框架耦合；Demo 可使用轻量第三方组件（当前包含 Element Plus）/ Keep production chat components low-coupling; demo pages may use lightweight third-party UI (Element Plus is currently included)
 - 所有用户可见文本需添加 i18n 条目 / All user-visible strings need i18n entries
 - Composable 封装有状态逻辑，组件专注渲染 / Composables for stateful logic, components for rendering
-- 聊天与配置状态统一由 Pinia Store 管理并持久化 / Chat and config state are unified in Pinia stores with persistence
+- 实时通信逻辑统一放在 composables（如 `useWebSocket.ts`），组件只消费状态与事件 / Realtime communication logic stays in composables (e.g. `useWebSocket.ts`), components consume state/events only
 
 ## 开发 / Development
 

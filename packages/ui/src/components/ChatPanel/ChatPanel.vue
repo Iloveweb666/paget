@@ -87,6 +87,8 @@ const {
   messageListRef,
   streamingMessageId,
   sendMessage,
+  addSystemMessage,
+  scrollToBottom,
   handleStreamChunk,
 } = useChat();
 
@@ -96,6 +98,9 @@ onMounted(async () => {
   // Register event handlers first (stored in registry), then connect (auto-binds on connect)
   onStatusChange((payload) => {
     agentHandleStatus(payload);
+    if (payload.status === AgentStatus.ERROR && payload.message?.trim()) {
+      addSystemMessage(payload.message);
+    }
 
     // Agent 开始运行时显示遮罩层，结束时隐藏 / Show mask when agent starts, hide when done
     // streaming 状态不显示遮罩、不禁用输入 / streaming status: no mask, no input disable
@@ -127,6 +132,10 @@ onMounted(async () => {
 
   // 监听批量操作指令：执行操作并上报结果 / Listen for batch actions: execute and report results
   onBatchAction(async (payload) => {
+    showSettings.value = false;
+    showWSLog.value = false;
+    showBrowserState.value = false;
+    emit("close");
     const result = await executeBatch(payload.actions);
     reportBatchResult(payload.sessionId, result.results);
   });
@@ -141,6 +150,7 @@ onMounted(async () => {
 function handleSend() {
   const msg = sendMessage();
   if (!msg) return;
+  scrollToBottom();
   submitTask({
     task: msg.content,
     sessionId: sessionId.value,

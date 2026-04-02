@@ -231,11 +231,15 @@ export class AgentService {
 
         const results = await ctx.executeBatchActions(stepOutput.actions);
         if (aborted) break;
+        const executedActions = stepOutput.actions.slice(0, results.length);
+        const batchTruncated =
+          results.length < stepOutput.actions.length &&
+          results.every((r) => r.success);
 
         ctx.emitActivity({
           type: 'executed',
-          actionIndex: stepOutput.actions.length - 1,
-          actionTotal: stepOutput.actions.length,
+          actionIndex: Math.max(results.length - 1, 0),
+          actionTotal: results.length,
         });
 
         // 等待页面动画/渲染稳定（下拉菜单收起、路由过渡等）
@@ -251,7 +255,7 @@ export class AgentService {
             memory: stepOutput.memory,
             next_goal: stepOutput.next_goal,
           },
-          actions: stepOutput.actions,
+          actions: executedActions,
           results,
           usage: stepOutput.usage,
           timestamp: Date.now(),
@@ -266,11 +270,23 @@ export class AgentService {
             memory: stepOutput.memory,
             next_goal: stepOutput.next_goal,
           },
-          actions: stepOutput.actions,
+          actions: executedActions,
           results,
         });
         await this.sessionService.appendHistory(sessionId, stepEvent);
         ctx.emitHistory(stepEvent);
+
+        if (batchTruncated) {
+          const obs = {
+            type: 'observation' as const,
+            message:
+              'Batch execution stopped early after interacting with a dropdown-like control so the UI state can settle. Re-observe the page and handle the updated options or dependent fields before other actions.',
+            timestamp: Date.now(),
+            taskRunId: ctx.taskRunId,
+          };
+          await this.sessionService.appendHistory(sessionId, obs);
+          ctx.emitHistory(obs);
+        }
 
         // 5. CHECK（检查）— 检查批量操作中是否有错误 / Check for errors in batch results
         const hasError = results.some((r) => !r.success);

@@ -24,7 +24,11 @@ export function useAgent() {
   const { status, history, activity: currentActivity, taskId } = storeToRefs(chatStore)
 
   // 是否正在运行 / Whether the agent is running
-  const isRunning = computed(() => status.value === AgentStatus.RUNNING)
+  const isRunning = computed(
+    () =>
+      status.value === AgentStatus.RUNNING ||
+      status.value === AgentStatus.STREAMING,
+  )
   // 是否处于空闲状态 / Whether the agent is idle
   const isIdle = computed(() => status.value === AgentStatus.IDLE)
 

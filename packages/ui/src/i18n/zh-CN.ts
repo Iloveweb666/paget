@@ -43,6 +43,7 @@ export default {
     title: 'WS 日志',
     clear: '清空',
     export: '导出 JSON',
+    exportRecentConversation: '导出最近一次对话 JSON',
     refresh: '刷新',
     close: '关闭',
     empty: '暂无日志',

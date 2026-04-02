@@ -21,7 +21,11 @@ const fabPosition = ref({ x: 0, y: 0 })
 
 // 使用 Pinia store 共享 Agent 状态（FAB 和 Dialog 共用）/ Share agent status via Pinia store
 const chatStore = useChatStore()
-const isRunning = computed(() => chatStore.status === AgentStatus.RUNNING)
+const isRunning = computed(
+  () =>
+    chatStore.status === AgentStatus.RUNNING ||
+    chatStore.status === AgentStatus.STREAMING,
+)
 
 // 对话框尺寸 / Dialog dimensions
 const DIALOG_W = 400

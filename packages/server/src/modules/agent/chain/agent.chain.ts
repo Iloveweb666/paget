@@ -2,34 +2,40 @@
  * 智能体推理链 — 组装消息、调用 LLM 并解析结构化输出
  * Agent chain — assembles messages, calls LLM, and parses structured output
  */
-import { ChatOpenAI } from '@langchain/openai';
+import { ChatOpenAI } from "@langchain/openai";
 import {
   HumanMessage,
   SystemMessage,
   AIMessage,
-} from '@langchain/core/messages';
-import { ToolRegistry } from '../tools/tool.registry';
-import { macroToolToOpenAIFunction } from './macro-tool.chain';
+} from "@langchain/core/messages";
+import { ToolRegistry } from "../tools/tool.registry";
+import { macroToolToOpenAIFunction } from "./macro-tool.chain";
 
 /**
  * 智能体推理链的输入参数
  * Input parameters for the agent chain
  */
 export interface AgentChainInput {
-  systemPrompt: string;    // 系统提示词 / System prompt
-  browserState: {          // 当前浏览器页面状态 / Current browser page state
-    header: string;        // 页面头部信息 / Page header info
-    content: string;       // 页面主要内容 / Page main content
-    footer: string;        // 页面底部信息 / Page footer info
+  systemPrompt: string; // 系统提示词 / System prompt
+  browserState: {
+    // 当前浏览器页面状态 / Current browser page state
+    header: string; // 页面头部信息 / Page header info
+    content: string; // 页面主要内容 / Page main content
+    footer: string; // 页面底部信息 / Page footer info
   };
-  history: Array<{         // 之前步骤的历史记录 / History of previous steps
-    reflection: { evaluation_previous_goal: string; memory: string; next_goal: string };
+  history: Array<{
+    // 之前步骤的历史记录 / History of previous steps
+    reflection: {
+      evaluation_previous_goal: string;
+      memory: string;
+      next_goal: string;
+    };
     actions: Array<{ tool: string; params: Record<string, unknown> }>;
     results: Array<{ success: boolean; output?: string; error?: string }>;
   }>;
-  task: string;            // 用户任务描述 / User task description
-  stepNumber: number;      // 当前步骤编号 / Current step number
-  maxSteps: number;        // 最大步骤数 / Maximum step count
+  task: string; // 用户任务描述 / User task description
+  stepNumber: number; // 当前步骤编号 / Current step number
+  maxSteps: number; // 最大步骤数 / Maximum step count
 }
 
 /**
@@ -37,11 +43,27 @@ export interface AgentChainInput {
  * Output result of the agent chain
  */
 export interface AgentChainOutput {
-  evaluation_previous_goal: string;  // 上一步执行评估 / Evaluation of the previous step
-  memory: string;                    // 需要记住的关键信息 / Key information to remember
-  next_goal: string;                 // 下一步目标 / Next goal
+  evaluation_previous_goal: string; // 上一步执行评估 / Evaluation of the previous step
+  memory: string; // 需要记住的关键信息 / Key information to remember
+  next_goal: string; // 下一步目标 / Next goal
   actions: Array<{ tool: string; params: Record<string, unknown> }>; // 待执行的操作列表 / Actions to execute
-  usage?: { promptTokens: number; completionTokens: number; totalTokens: number }; // Token 使用统计 / Token usage statistics
+  usage?: {
+    promptTokens: number;
+    completionTokens: number;
+    totalTokens: number;
+  }; // Token 使用统计 / Token usage statistics
+}
+
+function shouldRetryWithoutToolChoice(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+  const message = error.message.toLowerCase();
+  return (
+    message.includes("tool_choice") &&
+    (message.includes("required") || message.includes("object")) &&
+    message.includes("thinking mode")
+  );
 }
 
 /**
@@ -71,8 +93,8 @@ export async function executeAgentStep(
       `memory: ${step.reflection.memory}`,
       `goal: ${step.reflection.next_goal}`,
       `actions: ${JSON.stringify(step.actions)}`,
-      `results: ${step.results.map((r) => r.success ? r.output : `ERROR: ${r.error}`).join('; ')}`,
-    ].join('\n');
+      `results: ${step.results.map((r) => (r.success ? r.output : `ERROR: ${r.error}`)).join("; ")}`,
+    ].join("\n");
     messages.push(new AIMessage(reflection)); // 将历史步骤作为 AI 消息注入 / Inject historical steps as AI messages
   }
 
@@ -80,31 +102,43 @@ export async function executeAgentStep(
   const userPrompt = [
     `## Current Task`,
     input.task,
-    '',
+    "",
     `## Step ${input.stepNumber}/${input.maxSteps}`,
-    '',
+    "",
     `## Current Page State`,
     input.browserState.header,
-    '',
-    '```',
+    "",
+    "```",
     input.browserState.content,
-    '```',
-    '',
+    "```",
+    "",
     input.browserState.footer,
-  ].join('\n');
+  ].join("\n");
 
   messages.push(new HumanMessage(userPrompt));
 
-  // 调用 LLM，强制使用 agent_step 函数调用 / Call LLM, force using agent_step function call
-  const response = await model.invoke(messages, {
-    tools: [macroTool],
-    tool_choice: { type: 'function', function: { name: 'agent_step' } },
-  });
+  let response: Awaited<ReturnType<ChatOpenAI["invoke"]>>;
+  try {
+    response = await model.invoke(messages, {
+      tools: [macroTool],
+      tool_choice: "required",
+    });
+  } catch (error) {
+    if (!shouldRetryWithoutToolChoice(error)) {
+      throw error;
+    }
+    response = await model.invoke(messages, {
+      tools: [macroTool],
+    });
+  }
 
   // 从响应中解析工具调用结果 / Parse tool call result from response
   const toolCalls = response.tool_calls;
   if (!toolCalls || toolCalls.length === 0) {
-    throw new Error('LLM did not return a tool call');
+    throw new Error("LLM did not return a tool call");
+  }
+  if (toolCalls[0].name !== "agent_step") {
+    throw new Error(`LLM returned unexpected tool call: ${toolCalls[0].name}`);
   }
 
   const args = toolCalls[0].args as AgentChainOutput;

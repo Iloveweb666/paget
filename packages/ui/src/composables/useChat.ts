@@ -83,6 +83,11 @@ export function useChat() {
    */
   function handleStreamChunk(payload: StreamChunkPayload) {
     const existing = messages.value.find((m) => m.id === payload.messageId);
+    if (payload.done && !existing && !payload.chunk.trim()) {
+      streamingMessageId.value = null;
+      return;
+    }
+
     if (existing) {
       existing.content += payload.chunk;
     } else {

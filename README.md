@@ -29,24 +29,24 @@ Each agent step outputs:
 1. **evaluation_previous_goal** — 评估上一步目标完成度 / Assess previous goal completion
 2. **memory** — 需要记住的关键信息 / Key information to carry forward
 3. **next_goal** — 下一步要达成的目标 / Next objective to achieve
-4. **actions[]** — 待执行的批量操作 / Batch actions to execute
+4. **actions\[]** — 待执行的批量操作 / Batch actions to execute
 
 ### 事件模型 / Event Model
 
-| 类型 / Type | 用途 / Purpose | 存储 / Storage |
-|---|---|---|
-| `statuschange` | Agent 生命周期：idle → running → completed/error | 会话内存 / Session memory |
-| `historychange` | 步骤、观察、错误记录（作为 LLM 上下文）| 会话内存 / Session memory |
-| `activity` | 瞬态 UI 反馈：thinking / executing / executed | No |
+| 类型 / Type     | 用途 / Purpose                                   | 存储 / Storage            |
+| --------------- | ------------------------------------------------ | ------------------------- |
+| `statuschange`  | Agent 生命周期：idle → running → completed/error | 会话内存 / Session memory |
+| `historychange` | 步骤、观察、错误记录（作为 LLM 上下文）          | 会话内存 / Session memory |
+| `activity`      | 瞬态 UI 反馈：thinking / executing / executed    | No                        |
 
 ## 技术栈 / Tech Stack
 
-| 层级 / Layer | 技术 / Technology |
-|---|---|
-| 前端 / Frontend | Vue 3 + TypeScript + Vite + Pinia |
-| 后端 / Backend | NestJS + LangChain.js |
-| 实时通信 / Realtime | Socket.IO (WebSocket) |
-| 包管理 / Monorepo | pnpm workspace |
+| 层级 / Layer        | 技术 / Technology                 |
+| ------------------- | --------------------------------- |
+| 前端 / Frontend     | Vue 3 + TypeScript + Vite + Pinia |
+| 后端 / Backend      | NestJS + LangChain.js             |
+| 实时通信 / Realtime | Socket.IO (WebSocket)             |
+| 包管理 / Monorepo   | pnpm workspace                    |
 
 ## 项目结构 / Project Structure
 
@@ -84,7 +84,7 @@ paget/
 ### 安装 / Install
 
 ```bash
-git clone https://github.com/user/paget.git
+git clone https://github.com/Iloveweb666/paget
 cd paget
 pnpm install
 ```
@@ -99,13 +99,17 @@ cp .env.example .env
 
 `.env` 配置项 / Configuration options:
 
-| 变量 / Variable | 说明 / Description | 默认值 / Default |
-|---|---|---|
-| `SERVER_PORT` | 后端端口 / Server port | `3000` |
-| `WS_PORT` | WebSocket 端口 / WebSocket port | `3001` |
-| `DEFAULT_LLM_BASE_URL` | LLM API 地址 / LLM API URL | `https://api.openai.com/v1` |
-| `DEFAULT_LLM_API_KEY` | LLM API 密钥 / LLM API key | — |
-| `DEFAULT_LLM_MODEL` | 默认模型 / Default model | `gpt-4o` |
+| 变量 / Variable        | 说明 / Description                             | 默认值 / Default            |
+| ---------------------- | ---------------------------------------------- | --------------------------- |
+| `SERVER_PORT`          | HTTP 与 Socket.IO 端口 / HTTP + Socket.IO port | `3000`                      |
+| `DEFAULT_LLM_BASE_URL` | LLM API 地址 / LLM API URL                     | `https://api.openai.com/v1` |
+| `DEFAULT_LLM_API_KEY`  | LLM API 密钥 / LLM API key                     | —                           |
+| `DEFAULT_LLM_MODEL`    | 默认模型 / Default model                       | `gpt-4o`                    |
+| `DEFAULT_LLM_TEMPERATURE` | 基础温度参数 / Base temperature             | `0.7`                       |
+| `DEFAULT_LLM_MAX_TOKENS`  | 基础最大输出 token 数 / Base max tokens     | `4096`                      |
+
+Socket.IO 与 HTTP 服务复用同一端口（`SERVER_PORT`）。
+Socket.IO and HTTP service share the same port (`SERVER_PORT`).
 
 会话状态保存在进程内存中，服务重启后会丢失历史记录。
 Session state is kept in process memory, so history is cleared on restart.
@@ -113,20 +117,29 @@ Session state is kept in process memory, so history is cleared on restart.
 前端设置面板支持配置每次任务的 `maxSteps`，并在提交任务时透传到后端 Agent 循环。
 The frontend settings panel supports per-task `maxSteps`, which is forwarded to the backend agent loop on task submission.
 
+### 模型自定义配置 / Model Overrides
+
+服务端会先读取 `.env` 里的基础 LLM 配置，再叠加模型专属覆盖项。模型专属参数统一维护在 [packages/server/src/modules/llm/llm-model.config.ts](D:/adminWorkspace/paget/packages/server/src/modules/llm/llm-model.config.ts)，后续新增模型时优先修改这里，而不是继续在 `LLMService` 中堆分支。
+
+The server reads baseline LLM settings from `.env` first, then applies model-specific overrides. Those model-specific parameters are centrally maintained in [packages/server/src/modules/llm/llm-model.config.ts](D:/adminWorkspace/paget/packages/server/src/modules/llm/llm-model.config.ts). When new models are added, update that config file instead of growing more branches inside `LLMService`.
+
+当前示例 / Current example:
+
+- `qwen*` 自动注入 `modelKwargs.enable_thinking = false`
+
 ### 开发 / Development
 
 ```bash
-# 构建共享包（首次必须）/ Build shared package (required first time)
-pnpm build:shared
-
-# 启动前端开发服务器 / Start frontend dev server
-pnpm dev:ui
-
-# 启动后端开发服务器 / Start backend dev server
-pnpm dev:server
-
-# 同时启动前后端 / Start both
+# 推荐：一条命令启动全部（会自动预构建 shared/page-controller 与 bookmarklet）
+# Recommended: start all with one command (auto prebuild shared/page-controller + bookmarklet)
 pnpm dev
+
+# 分开启动（适合分别调试）
+# Start separately (for focused debugging)
+pnpm --filter @paget/shared dev
+pnpm --filter @paget/page-controller dev
+pnpm dev:server
+pnpm dev:ui
 ```
 
 ### 构建 / Build

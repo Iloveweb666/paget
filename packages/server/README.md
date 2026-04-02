@@ -10,7 +10,7 @@ Handles LLM management, agent orchestration, prompt management, in-memory sessio
 
 | 模块 / Module | 职责 / Responsibility |
 |---|---|
-| `llm` | LLM 配置管理（多模型、API Key 来自环境变量）/ LLM config management |
+| `llm` | LLM 配置管理（环境变量基础配置 + `llm-model.config.ts` 模型覆盖项）/ LLM config management |
 | `agent` | Agent 编排（反思-行动循环、工具注册）/ Agent orchestration (reflection loop, tool registry) |
 | `prompt` | 系统 Prompt 管理 / System prompt management |
 | `session` | 会话状态与历史记录管理 / Session state & history management |
@@ -18,6 +18,16 @@ Handles LLM management, agent orchestration, prompt management, in-memory sessio
 ## Agent 执行流程 / Agent Execution Flow
 
 ```
+
+## 模型自定义配置 / Model Overrides
+
+`llm` 模块现在将模型专属参数集中维护在 [src/modules/llm/llm-model.config.ts](D:/adminWorkspace/paget/packages/server/src/modules/llm/llm-model.config.ts)。`LLMService` 只负责读取基础环境变量并合并这些覆盖项。
+
+The `llm` module now centralizes model-specific parameters in [src/modules/llm/llm-model.config.ts](D:/adminWorkspace/paget/packages/server/src/modules/llm/llm-model.config.ts). `LLMService` only reads the baseline environment config and merges those overrides.
+
+当前内置规则 / Current built-in rule:
+
+- `qwen*` 自动注入 `modelKwargs.enable_thinking = false`
 task:submit (WebSocket)
   │
   ▼
@@ -59,6 +69,7 @@ Agent 通过 `ToolRegistry` 注册工具，LLM 以 function calling 方式调用
 | `agent:status` | Server → Client | Agent 状态变更 |
 | `agent:history` | Server → Client | 历史事件追加 |
 | `agent:activity` | Server → Client | 瞬态活动反馈 |
+| `agent:stream` | Server → Client | 纯对话模式下的流式文本输出 |
 | `page:action` | Server → Client | 请求页面操作 |
 | `page:state` | Client → Server | 上报页面状态 |
 | `page:batch_action` | Server → Client | 请求批量操作 |
@@ -66,10 +77,10 @@ Agent 通过 `ToolRegistry` 注册工具，LLM 以 function calling 方式调用
 
 ## 规则 / Rules
 
-- 模块结构：`module.ts` + `service.ts` + `controller.ts` + `dto/`
-- 业务逻辑在 Service，Controller 只做薄封装 / Business logic in services, thin controllers
+- 当前模块结构以 `module.ts` + `service.ts` + `gateway.ts` 为主，`agent` 模块含 `chain/` 与 `tools/` 子层
+- 业务逻辑在 Service/Chain，Gateway 负责协议收发与连接生命周期管理
 - 会话状态保存在进程内存中，无需外部存储层 / Session state lives in process memory, with no external storage layer
-- DTO 用 class-validator 校验，Agent 工具用 Zod / class-validator for DTOs, Zod for agent tools
+- 入参与配置可使用 class-validator；Agent 工具 schema 使用 Zod
 - WebSocket 事件名使用 `@paget/shared` 常量 / Use event constants from shared package
 - 禁止日志或响应中暴露 API Key / Never expose API keys in logs or responses
 
