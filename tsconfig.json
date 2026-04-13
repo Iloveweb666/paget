@@ -3,7 +3,9 @@
   "references": [
     { "path": "packages/shared" },
     { "path": "packages/page-controller" },
+    { "path": "packages/llm" },
+    { "path": "packages/server" },
     { "path": "packages/ui" },
-    { "path": "packages/server" }
+    { "path": "packages/website" }
   ]
 }

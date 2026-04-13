@@ -51,6 +51,7 @@ defineExpose({ x, y });
 <template>
   <div
     class="floating-button"
+    data-paget-ignore="true"
     :class="{ 'floating-button--dragging': isDragging }"
     :style="{
       left: x + 'px',

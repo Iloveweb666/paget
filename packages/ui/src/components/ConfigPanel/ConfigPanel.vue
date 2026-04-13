@@ -51,7 +51,7 @@ function handleBackdropClick(e: MouseEvent) {
 
 <template>
   <Teleport to="body">
-    <div class="settings-overlay" @click="handleBackdropClick">
+    <div class="settings-overlay" data-paget-ignore="true" @click="handleBackdropClick">
       <div class="settings-modal">
         <!-- 头部 / Header -->
         <div class="settings-modal__header">

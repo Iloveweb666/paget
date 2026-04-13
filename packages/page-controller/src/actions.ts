@@ -1,1003 +1,820 @@
 /**
- * DOM 操作原语
- * DOM action primitives — aligned with page-agent's battle-tested implementation
- */
-import type { AgentAction, ActionResult, BatchResult } from "@paget/shared";
-
-// ======= 通用工具 / General utils =======
-
-/**
- * 等待指定秒数 / Wait for specified seconds
- */
-async function waitFor(seconds: number): Promise<void> {
-  await new Promise((resolve) => setTimeout(resolve, seconds * 1000));
-}
-
-function isVisibleElement(element: Element | null): element is HTMLElement {
-  return (
-    !!element &&
-    element instanceof HTMLElement &&
-    element.getClientRects().length > 0
-  );
-}
-
-// ======= DOM 工具 / DOM utils =======
-
-/**
- * 将遮罩层指针移动到元素中心位置（触发视觉反馈）
- * Move mask pointer to element center (triggers visual feedback)
- */
-export async function movePointerToElement(
-  element: HTMLElement,
-): Promise<void> {
-  const rect = element.getBoundingClientRect();
-  const x = rect.left + rect.width / 2;
-  const y = rect.top + rect.height / 2;
-
-  // 派发自定义事件供 SimulatorMask 监听 / Dispatch custom event for SimulatorMask
-  window.dispatchEvent(
-    new CustomEvent("PageAgent::MovePointerTo", { detail: { x, y } }),
-  );
-
-  await waitFor(0.3);
-}
-
-/**
- * 如果元素不在视口内则滚动到可见位置
- * Scroll element into view if not currently visible
- */
-export async function scrollIntoViewIfNeeded(
-  element: HTMLElement,
-): Promise<void> {
-  // 优先使用非标准但更精确的 scrollIntoViewIfNeeded / Prefer non-standard but more precise method
-  const el = element as any;
-  if (el.scrollIntoViewIfNeeded) {
-    el.scrollIntoViewIfNeeded();
-  } else {
-    el.scrollIntoView({ behavior: "auto", block: "center", inline: "nearest" });
-  }
-}
-
-// 记录上一次点击的元素，以便在下一次点击前清理焦点 / Track last clicked element for blur cleanup
-let lastClickedElement: HTMLElement | null = null;
-
-/**
- * 清除上一次点击的元素的焦点状态
- * Blur the previously clicked element
- */
-function blurLastClickedElement(): void {
-  if (lastClickedElement) {
-    lastClickedElement.blur();
-    lastClickedElement.dispatchEvent(
-      new MouseEvent("mouseout", { bubbles: true, cancelable: true }),
-    );
-    lastClickedElement = null;
-  }
-}
-
-/**
- * 模拟完整点击，可选在动作结束后失焦
- * Simulate a full click, optionally blur after completion
- */
-export async function clickElement(
-  element: HTMLElement,
-  options: { blurAfter?: boolean } = {},
-): Promise<void> {
-  // 检测元素是否在弹出层（下拉菜单/选择器弹层）内部
-  // Detect if element is inside a popper/dropdown overlay
-  const isInsidePopper = element.closest(
-    "[class*=”select__popper”], [class*=”select-dropdown”], [class*=”dropdown-menu”], [role=”listbox”]",
-  );
-
-  // 弹出层内的元素使用简化点击：避免 focus() 导致父级 select 失焦从而关闭下拉
-  // Use simplified click for elements inside poppers: avoid focus() causing parent select blur which closes dropdown
-  if (isInsidePopper) {
-    element.dispatchEvent(
-      new MouseEvent("mouseenter", { bubbles: true, cancelable: true }),
-    );
-    element.dispatchEvent(
-      new MouseEvent("mouseover", { bubbles: true, cancelable: true }),
-    );
-    element.dispatchEvent(
-      new MouseEvent("mousedown", { bubbles: true, cancelable: true }),
-    );
-    element.dispatchEvent(
-      new MouseEvent("mouseup", { bubbles: true, cancelable: true }),
-    );
-    element.click();
-    await waitFor(0.3);
-    return;
-  }
-
-  // 不在点击前强制失焦：避免下拉菜单在”展开后点选项”场景被提前收起
-  // Do not force blur before click: avoids collapsing dropdowns between two-step clicks
-  lastClickedElement = element;
-
-  // 确保元素在视口内 / Ensure element is in viewport
-  await scrollIntoViewIfNeeded(element);
-
-  // 移动指针到元素中心（视觉反馈）/ Move pointer to element center (visual feedback)
-  await movePointerToElement(element);
-
-  // 派发点击动画事件 / Dispatch click animation event
-  window.dispatchEvent(new CustomEvent("PageAgent::ClickPointer"));
-  await waitFor(0.1);
-
-  // 悬停事件 / Hover events
-  element.dispatchEvent(
-    new MouseEvent("mouseenter", { bubbles: true, cancelable: true }),
-  );
-  element.dispatchEvent(
-    new MouseEvent("mouseover", { bubbles: true, cancelable: true }),
-  );
-
-  // 按下、聚焦、抬起、点击 / Press, focus, release, click
-  element.dispatchEvent(
-    new MouseEvent("mousedown", { bubbles: true, cancelable: true }),
-  );
-  element.focus();
-  element.dispatchEvent(
-    new MouseEvent("mouseup", { bubbles: true, cancelable: true }),
-  );
-  element.dispatchEvent(
-    new MouseEvent("click", { bubbles: true, cancelable: true }),
-  );
-
-  // 等待确保点击事件处理完成 / Wait for click event processing
-  await waitFor(0.2);
-
-  if (shouldRetryPopupTriggerClick(element) && !hasPopupOpened(element)) {
-    await retryPopupTriggerClick(element);
-  }
-
-  // 按需在点击后失焦 / Blur after click when requested
-  if (options.blurAfter) {
-    blurLastClickedElement();
-  }
-}
-
-// 原生 value setter，绕过框架代理（React/Vue）/ Native value setters to bypass framework proxies
-// eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
-  window.HTMLInputElement.prototype,
-  "value",
-)!.set!;
-
-// eslint-disable-next-line @typescript-eslint/no-non-null-assertion
-const nativeTextAreaValueSetter = Object.getOwnPropertyDescriptor(
-  window.HTMLTextAreaElement.prototype,
-  "value",
-)!.set!;
-
-/**
- * 向元素输入文本（对齐 page-agent 实现）
- * Input text into an element (aligned with page-agent)
+ * Copyright (C) 2025 Alibaba Group Holding Limited
+ * All rights reserved.
  *
- * 支持三种类型 / Supports three types:
- * - HTMLInputElement / HTMLTextAreaElement：使用原生 setter 触发框架响应式
- * - contenteditable：使用 beforeinput + input 事件序列
+ * DOM 操作原语（完全复刻 page-agent）+ paget 扩展
+ * DOM action primitives (fully replicated from page-agent) + paget extensions
  */
-export async function inputText(
-  element: HTMLElement,
-  text: string,
-  options: { blurAfter?: boolean } = {},
-): Promise<void> {
-  const isContentEditable = element.isContentEditable;
+import type { AgentAction, ActionResult, BatchResult } from '@paget/shared'
+import type { InteractiveElementDomNode } from './dom/dom_tree/type'
+import {
+	clickPointer,
+	disablePassThrough,
+	enablePassThrough,
+	getIframeOffset,
+	getNativeValueSetter,
+	isAnchorElement,
+	isHTMLElement,
+	isInputElement,
+	isSelectElement,
+	isTextAreaElement,
+	movePointerToElement,
+	waitFor,
+} from './utils'
+import { isVueApp, triggerVueCheck, triggerVueInput, triggerVueSelect } from './patches/vue'
 
-  if (
-    !(element instanceof HTMLInputElement) &&
-    !(element instanceof HTMLTextAreaElement) &&
-    !isContentEditable
-  ) {
-    throw new Error("Element is not an input, textarea, or contenteditable");
-  }
+/**
+ * Get the HTMLElement by index from a selectorMap.
+ * @private Internal method, subject to change at any time.
+ */
+export function getElementByIndex(
+	selectorMap: Map<number, InteractiveElementDomNode>,
+	index: number
+): HTMLElement {
+	const interactiveNode = selectorMap.get(index)
+	if (!interactiveNode) {
+		throw new Error(`No interactive element found at index ${index}`)
+	}
 
-  // 先点击元素使其获得焦点 / Click element first to focus it
-  await clickElement(element, { blurAfter: false });
+	const element = interactiveNode.ref
+	if (!element) {
+		throw new Error(`Element at index ${index} does not have a reference`)
+	}
 
-  if (isContentEditable) {
-    // Contenteditable 支持（部分）/ Contenteditable support (partial)
-    // 适用于：LinkedIn、React contenteditable、Quill
-    // Works: LinkedIn, React contenteditable, Quill
-    // 不适用于：Slate.js / Fails: Slate.js
-    // 事件序列：beforeinput → mutation → input → change → blur
-    // Sequence: beforeinput → mutation → input → change → blur
+	if (!isHTMLElement(element)) {
+		throw new Error(`Element at index ${index} is not an HTMLElement`)
+	}
 
-    // 清除阶段 / Clearing phase
-    if (
-      element.dispatchEvent(
-        new InputEvent("beforeinput", {
-          bubbles: true,
-          cancelable: true,
-          inputType: "deleteContent",
-        }),
-      )
-    ) {
-      element.innerText = "";
-      element.dispatchEvent(
-        new InputEvent("input", {
-          bubbles: true,
-          inputType: "deleteContent",
-        }),
-      );
-    }
+	return element
+}
 
-    // 插入阶段（对 React 应用尤为重要）/ Insertion phase (important for React apps)
-    if (
-      element.dispatchEvent(
-        new InputEvent("beforeinput", {
-          bubbles: true,
-          cancelable: true,
-          inputType: "insertText",
-          data: text,
-        }),
-      )
-    ) {
-      element.innerText = text;
-      element.dispatchEvent(
-        new InputEvent("input", {
-          bubbles: true,
-          inputType: "insertText",
-          data: text,
-        }),
-      );
-    }
+let lastClickedElement: HTMLElement | null = null
 
-    // 派发 change 事件 / Dispatch change event
-    element.dispatchEvent(new Event("change", { bubbles: true }));
-
-    // 触发 blur 以便表单验证 / Trigger blur for validation
-    element.blur();
-  } else if (element instanceof HTMLTextAreaElement) {
-    // 使用原生 setter 绕过 Vue/React 代理 / Use native setter to bypass Vue/React proxy
-    nativeTextAreaValueSetter.call(element, text);
-  } else {
-    // HTMLInputElement
-    nativeInputValueSetter.call(element, text);
-  }
-
-  // 非 contenteditable 需要额外派发 input 事件 / Non-contenteditable needs extra input event
-  if (!isContentEditable) {
-    element.dispatchEvent(new Event("input", { bubbles: true }));
-  }
-
-  await waitFor(0.1);
-
-  // 输入动作默认在完成后失焦，可由参数覆盖 / Input blurs by default after completion, overridable
-  if (options.blurAfter ?? true) {
-    blurLastClickedElement();
-  }
+function blurLastClickedElement() {
+	if (lastClickedElement) {
+		lastClickedElement.dispatchEvent(new PointerEvent('pointerout', { bubbles: true }))
+		lastClickedElement.dispatchEvent(new PointerEvent('pointerleave', { bubbles: false }))
+		lastClickedElement.dispatchEvent(new MouseEvent('mouseout', { bubbles: true }))
+		lastClickedElement.dispatchEvent(new MouseEvent('mouseleave', { bubbles: false }))
+		lastClickedElement.blur()
+		lastClickedElement = null
+	}
 }
 
 /**
- * 选择下拉选项（对齐 page-agent 实现）
- * Select a dropdown option (aligned with page-agent)
+ * Simulate a full click following W3C Pointer Events + UI Events spec order:
+ * pointerover/enter → mouseover/enter → pointerdown → mousedown → [focus] →
+ * pointerup → mouseup → click
+ *
+ * @private Internal method, subject to change at any time.
  */
-export async function selectOption(
-  element: HTMLSelectElement,
-  optionText: string,
-  control: { blurAfter?: boolean } = {},
-): Promise<void> {
-  if (!(element instanceof HTMLSelectElement)) {
-    throw new Error("Element is not a select element");
-  }
+export async function clickElement(element: HTMLElement) {
+	blurLastClickedElement()
 
-  const selectOptions = Array.from(element.options);
-  const option = selectOptions.find(
-    (opt) => opt.textContent?.trim() === optionText.trim(),
-  );
+	lastClickedElement = element
 
-  if (!option) {
-    throw new Error(
-      `Option with text "${optionText}" not found in select element`,
-    );
-  }
+	await scrollIntoViewIfNeeded(element)
+	const frame = element.ownerDocument.defaultView?.frameElement
+	if (frame) await scrollIntoViewIfNeeded(frame)
 
-  // 记录当前元素，便于统一失焦清理 / Track current element for blur cleanup
-  lastClickedElement = element;
-  element.focus();
-  element.value = option.value;
-  element.dispatchEvent(new Event("change", { bubbles: true }));
+	const rect = element.getBoundingClientRect()
+	const x = rect.left + rect.width / 2
+	const y = rect.top + rect.height / 2
 
-  await waitFor(0.1);
+	await movePointerToElement(element, x, y)
+	await clickPointer()
 
-  // Select 默认在完成后失焦，可由参数覆盖 / Select blurs by default after completion, overridable
-  if (control.blurAfter ?? true) {
-    blurLastClickedElement();
-  }
+	await waitFor(0.1)
+
+	// Hit-test to find the deepest element at click coordinates, matching
+	// real browser behavior where events target the innermost element.
+	// @note This may hit a element in the blacklist
+	// TODO: This is a temporary workaround. Should have been handled during dom extraction.
+	const doc = element.ownerDocument
+	await enablePassThrough()
+	const hitTarget = doc.elementFromPoint(x, y)
+	await disablePassThrough()
+	const target =
+		hitTarget instanceof HTMLElement && element.contains(hitTarget) ? hitTarget : element
+
+	const pointerOpts = {
+		bubbles: true,
+		cancelable: true,
+		clientX: x,
+		clientY: y,
+		pointerType: 'mouse',
+	}
+	const mouseOpts = { bubbles: true, cancelable: true, clientX: x, clientY: y, button: 0 }
+
+	// Hover — pointer events first, then mouse events (spec order)
+	target.dispatchEvent(new PointerEvent('pointerover', pointerOpts))
+	target.dispatchEvent(new PointerEvent('pointerenter', { ...pointerOpts, bubbles: false }))
+	target.dispatchEvent(new MouseEvent('mouseover', mouseOpts))
+	target.dispatchEvent(new MouseEvent('mouseenter', { ...mouseOpts, bubbles: false }))
+
+	// Press
+	target.dispatchEvent(new PointerEvent('pointerdown', pointerOpts))
+	target.dispatchEvent(new MouseEvent('mousedown', mouseOpts))
+
+	// Focus is not part of the standard pointer/mouse event sequence
+	// "undefined and varies between user agents".
+	// We focus the original element (nearest focusable ancestor), not the hit-test target, matching browser behavior.
+	element.focus({ preventScroll: true })
+
+	// Release
+	target.dispatchEvent(new PointerEvent('pointerup', pointerOpts))
+	target.dispatchEvent(new MouseEvent('mouseup', mouseOpts))
+
+	// Click — activation behavior (navigation, form submit, etc.) triggers
+	// via bubbling from target up to the interactive ancestor.
+	target.click()
+
+	await waitFor(0.2)
 }
 
 /**
- * 读取 blur 参数（仅接受布尔值）
- * Read blur param (boolean only)
+ * @private Internal method, subject to change at any time.
  */
-function readBlurParam(params: Record<string, unknown>): boolean | undefined {
-  return typeof params.blur === "boolean" ? params.blur : undefined;
+export async function inputTextElement(element: HTMLElement, text: string) {
+	const isContentEditable = element.isContentEditable
+	if (!isInputElement(element) && !isTextAreaElement(element) && !isContentEditable) {
+		throw new Error('Element is not an input, textarea, or contenteditable')
+	}
+
+	await clickElement(element)
+
+	if (isContentEditable) {
+		// Contenteditable support (partial)
+		// Not supported:
+		// - Monaco/CodeMirror: Require direct JS instance access. No universal way to obtain.
+		// - Draft.js: Not responsive to synthetic/execCommand/Range/DataTransfer. Unmaintained.
+		//
+		// Strategy: Try Plan A (synthetic events) first, then verify and fall back
+		// to Plan B (execCommand) if the text wasn't actually inserted.
+		//
+		// Plan A: Dispatch synthetic events
+		// Works: React contenteditable, Quill.
+		// Fails: Slate.js, some contenteditable editors that ignore synthetic events.
+		// Sequence: beforeinput -> mutation -> input -> change -> blur
+
+		// Dispatch beforeinput + mutation + input for clearing
+		if (
+			element.dispatchEvent(
+				new InputEvent('beforeinput', {
+					bubbles: true,
+					cancelable: true,
+					inputType: 'deleteContent',
+				})
+			)
+		) {
+			element.innerText = ''
+			element.dispatchEvent(
+				new InputEvent('input', {
+					bubbles: true,
+					inputType: 'deleteContent',
+				})
+			)
+		}
+
+		// Dispatch beforeinput + mutation + input for insertion (important for React apps)
+		if (
+			element.dispatchEvent(
+				new InputEvent('beforeinput', {
+					bubbles: true,
+					cancelable: true,
+					inputType: 'insertText',
+					data: text,
+				})
+			)
+		) {
+			element.innerText = text
+			element.dispatchEvent(
+				new InputEvent('input', {
+					bubbles: true,
+					inputType: 'insertText',
+					data: text,
+				})
+			)
+		}
+
+		// Verify Plan A worked by checking if the text was actually inserted
+		const planASucceeded = element.innerText.trim() === text.trim()
+
+		if (!planASucceeded) {
+			// Plan B: execCommand fallback (deprecated but widely supported)
+			// Works: Quill, Slate.js, react contenteditable components.
+			// This approach integrates with the browser's undo stack and is handled
+			// natively by most rich-text editors.
+			element.focus()
+
+			// Select all existing content and delete it
+			const doc = element.ownerDocument
+			const selection = (doc.defaultView || window).getSelection()
+			const range = doc.createRange()
+			range.selectNodeContents(element)
+			selection?.removeAllRanges()
+			selection?.addRange(range)
+
+			// eslint-disable-next-line @typescript-eslint/no-deprecated
+			doc.execCommand('delete', false)
+			// eslint-disable-next-line @typescript-eslint/no-deprecated
+			doc.execCommand('insertText', false, text)
+		}
+
+		// Dispatch change event (for good measure)
+		element.dispatchEvent(new Event('change', { bubbles: true }))
+
+		// Trigger blur for validation
+		element.blur()
+	} else {
+		getNativeValueSetter(element as HTMLInputElement | HTMLTextAreaElement).call(element, text)
+	}
+
+	// Only dispatch shared input event for non-contenteditable (contenteditable has its own)
+	if (!isContentEditable) {
+		element.dispatchEvent(new Event('input', { bubbles: true }))
+	}
+
+	await waitFor(0.1)
+
+	blurLastClickedElement()
 }
 
 /**
- * 判断元素是否是下拉相关控件（原生 select / ARIA combobox / 常见类名）
- * Detect dropdown-related controls (native select / ARIA combobox / common class names)
+ * @todo browser-use version is very complex and supports menu tags, need to follow up
+ * @private Internal method, subject to change at any time.
+ */
+export async function selectOptionElement(selectElement: HTMLSelectElement, optionText: string) {
+	if (!isSelectElement(selectElement)) {
+		throw new Error('Element is not a select element')
+	}
+
+	const options = Array.from(selectElement.options)
+	const option = options.find((opt) => opt.textContent?.trim() === optionText.trim())
+
+	if (!option) {
+		throw new Error(`Option with text "${optionText}" not found in select element`)
+	}
+
+	selectElement.value = option.value
+	selectElement.dispatchEvent(new Event('change', { bubbles: true }))
+
+	await waitFor(0.1) // Wait to ensure change event processing completes
+}
+
+interface ScrollableElement extends Element {
+	scrollIntoViewIfNeeded?: (centerIfNeeded?: boolean) => void
+}
+
+/**
+ * @private Internal method, subject to change at any time.
+ */
+export async function scrollIntoViewIfNeeded(element: Element) {
+	const el = element as ScrollableElement
+	if (typeof el.scrollIntoViewIfNeeded === 'function') {
+		el.scrollIntoViewIfNeeded()
+		// await waitFor(0.5) // Animation playback
+	} else {
+		// @todo visibility check
+		element.scrollIntoView({ behavior: 'auto', block: 'center', inline: 'nearest' })
+		// await waitFor(0.5) // Animation playback
+	}
+}
+
+export async function scrollVertically(scroll_amount: number, element?: HTMLElement | null) {
+	// Element-specific scrolling if element is provided
+	if (element) {
+		const targetElement = element
+		let currentElement = targetElement as HTMLElement | null
+		let scrollSuccess = false
+		let scrolledElement: HTMLElement | null = null
+		let scrollDelta = 0
+		let attempts = 0
+		const dy = scroll_amount
+
+		while (currentElement && attempts < 10) {
+			const computedStyle = window.getComputedStyle(currentElement)
+			const hasScrollableY =
+				/(auto|scroll|overlay)/.test(computedStyle.overflowY) ||
+				(computedStyle.scrollbarWidth && computedStyle.scrollbarWidth !== 'auto') ||
+				(computedStyle.scrollbarGutter && computedStyle.scrollbarGutter !== 'auto')
+			const canScrollVertically = currentElement.scrollHeight > currentElement.clientHeight
+
+			if (hasScrollableY && canScrollVertically) {
+				const beforeScroll = currentElement.scrollTop
+				const maxScroll = currentElement.scrollHeight - currentElement.clientHeight
+
+				let scrollAmount = dy / 3
+
+				if (scrollAmount > 0) {
+					scrollAmount = Math.min(scrollAmount, maxScroll - beforeScroll)
+				} else {
+					scrollAmount = Math.max(scrollAmount, -beforeScroll)
+				}
+
+				currentElement.scrollTop = beforeScroll + scrollAmount
+
+				const afterScroll = currentElement.scrollTop
+				const actualScrollDelta = afterScroll - beforeScroll
+
+				if (Math.abs(actualScrollDelta) > 0.5) {
+					scrollSuccess = true
+					scrolledElement = currentElement
+					scrollDelta = actualScrollDelta
+					break
+				}
+			}
+
+			if (currentElement === document.body || currentElement === document.documentElement) {
+				break
+			}
+			currentElement = currentElement.parentElement
+			attempts++
+		}
+
+		if (scrollSuccess) {
+			return `Scrolled container (${scrolledElement?.tagName}) by ${scrollDelta}px`
+		} else {
+			return `No scrollable container found for element (${targetElement.tagName})`
+		}
+	}
+
+	// Page-level scrolling (default or fallback)
+
+	const dy = scroll_amount
+	const bigEnough = (el: HTMLElement) => el.clientHeight >= window.innerHeight * 0.5
+	const canScroll = (el: HTMLElement | null) =>
+		el &&
+		/(auto|scroll|overlay)/.test(getComputedStyle(el).overflowY) &&
+		el.scrollHeight > el.clientHeight &&
+		bigEnough(el)
+
+	// @deprecated Heuristic container search.
+	// Unreliable in multi-panel layouts. Should guide LLMs to use indexed scroll for consistency.
+	// TODO: remove this fallback
+
+	// try to find the nearest scrollable container
+	// document.activeElement is usually body.
+	// After a successful element.focus(), activeElement become the nearest focusable parent
+
+	let el: HTMLElement | null = document.activeElement as HTMLElement | null
+	while (el && !canScroll(el) && el !== document.body) el = el.parentElement
+
+	// Something is wrong if it falls back to global '*' search
+	// TODO: Return error message instead of global '*' search
+
+	el = canScroll(el)
+		? el
+		: Array.from(document.querySelectorAll<HTMLElement>('*')).find(canScroll) ||
+			(document.scrollingElement as HTMLElement) ||
+			(document.documentElement as HTMLElement)
+
+	if (el === document.scrollingElement || el === document.documentElement || el === document.body) {
+		// Page-level scroll
+		const scrollBefore = window.scrollY
+		const scrollMax = document.documentElement.scrollHeight - window.innerHeight
+
+		window.scrollBy(0, dy)
+
+		const scrollAfter = window.scrollY
+		const scrolled = scrollAfter - scrollBefore
+
+		if (Math.abs(scrolled) < 1) {
+			return dy > 0
+				? `⚠️ Already at the bottom of the page, cannot scroll down further.`
+				: `⚠️ Already at the top of the page, cannot scroll up further.`
+		}
+
+		const reachedBottom = dy > 0 && scrollAfter >= scrollMax - 1
+		const reachedTop = dy < 0 && scrollAfter <= 1
+
+		if (reachedBottom) return `✅ Scrolled page by ${scrolled}px. Reached the bottom of the page.`
+		if (reachedTop) return `✅ Scrolled page by ${scrolled}px. Reached the top of the page.`
+		return `✅ Scrolled page by ${scrolled}px.`
+	} else {
+		// Container scroll
+
+		const warningMsg = `The document is not scrollable. Falling back to container scroll.`
+		console.log(`[PageController] ${warningMsg}`)
+
+		const scrollBefore = el!.scrollTop
+		const scrollMax = el!.scrollHeight - el!.clientHeight
+
+		el!.scrollBy({ top: dy, behavior: 'smooth' })
+		await waitFor(0.1)
+
+		const scrollAfter = el!.scrollTop
+		const scrolled = scrollAfter - scrollBefore
+
+		if (Math.abs(scrolled) < 1) {
+			return dy > 0
+				? `⚠️ ${warningMsg} Already at the bottom of container (${el!.tagName}), cannot scroll down further.`
+				: `⚠️ ${warningMsg} Already at the top of container (${el!.tagName}), cannot scroll up further.`
+		}
+
+		const reachedBottom = dy > 0 && scrollAfter >= scrollMax - 1
+		const reachedTop = dy < 0 && scrollAfter <= 1
+
+		if (reachedBottom)
+			return `✅ ${warningMsg} Scrolled container (${el!.tagName}) by ${scrolled}px. Reached the bottom.`
+		if (reachedTop)
+			return `✅ ${warningMsg} Scrolled container (${el!.tagName}) by ${scrolled}px. Reached the top.`
+		return `✅ ${warningMsg} Scrolled container (${el!.tagName}) by ${scrolled}px.`
+	}
+}
+
+export async function scrollHorizontally(scroll_amount: number, element?: HTMLElement | null) {
+	// Element-specific scrolling if element is provided
+	if (element) {
+		const targetElement = element
+		let currentElement = targetElement as HTMLElement | null
+		let scrollSuccess = false
+		let scrolledElement: HTMLElement | null = null
+		let scrollDelta = 0
+		let attempts = 0
+		const dx = scroll_amount
+
+		while (currentElement && attempts < 10) {
+			const computedStyle = window.getComputedStyle(currentElement)
+			const hasScrollableX =
+				/(auto|scroll|overlay)/.test(computedStyle.overflowX) ||
+				(computedStyle.scrollbarWidth && computedStyle.scrollbarWidth !== 'auto') ||
+				(computedStyle.scrollbarGutter && computedStyle.scrollbarGutter !== 'auto')
+			const canScrollHorizontally = currentElement.scrollWidth > currentElement.clientWidth
+
+			if (hasScrollableX && canScrollHorizontally) {
+				const beforeScroll = currentElement.scrollLeft
+				const maxScroll = currentElement.scrollWidth - currentElement.clientWidth
+
+				let scrollAmount = dx / 3
+
+				if (scrollAmount > 0) {
+					scrollAmount = Math.min(scrollAmount, maxScroll - beforeScroll)
+				} else {
+					scrollAmount = Math.max(scrollAmount, -beforeScroll)
+				}
+
+				currentElement.scrollLeft = beforeScroll + scrollAmount
+
+				const afterScroll = currentElement.scrollLeft
+				const actualScrollDelta = afterScroll - beforeScroll
+
+				if (Math.abs(actualScrollDelta) > 0.5) {
+					scrollSuccess = true
+					scrolledElement = currentElement
+					scrollDelta = actualScrollDelta
+					break
+				}
+			}
+
+			if (currentElement === document.body || currentElement === document.documentElement) {
+				break
+			}
+			currentElement = currentElement.parentElement
+			attempts++
+		}
+
+		if (scrollSuccess) {
+			return `Scrolled container (${scrolledElement?.tagName}) horizontally by ${scrollDelta}px`
+		} else {
+			return `No horizontally scrollable container found for element (${targetElement.tagName})`
+		}
+	}
+
+	// Page-level scrolling (default or fallback)
+
+	const dx = scroll_amount
+
+	const bigEnough = (el: HTMLElement) => el.clientWidth >= window.innerWidth * 0.5
+	const canScroll = (el: HTMLElement | null) =>
+		el &&
+		/(auto|scroll|overlay)/.test(getComputedStyle(el).overflowX) &&
+		el.scrollWidth > el.clientWidth &&
+		bigEnough(el)
+
+	// @deprecated Same heuristic container search as scrollVertically.
+	// TODO: Remove once LLMs reliably use indexed scrolling via data-scrollable.
+
+	let el: HTMLElement | null = document.activeElement as HTMLElement | null
+	while (el && !canScroll(el) && el !== document.body) el = el.parentElement
+
+	el = canScroll(el)
+		? el
+		: Array.from(document.querySelectorAll<HTMLElement>('*')).find(canScroll) ||
+			(document.scrollingElement as HTMLElement) ||
+			(document.documentElement as HTMLElement)
+
+	if (el === document.scrollingElement || el === document.documentElement || el === document.body) {
+		// Page-level scroll
+		const scrollBefore = window.scrollX
+		const scrollMax = document.documentElement.scrollWidth - window.innerWidth
+
+		window.scrollBy(dx, 0)
+
+		const scrollAfter = window.scrollX
+		const scrolled = scrollAfter - scrollBefore
+
+		if (Math.abs(scrolled) < 1) {
+			return dx > 0
+				? `⚠️ Already at the right edge of the page, cannot scroll right further.`
+				: `⚠️ Already at the left edge of the page, cannot scroll left further.`
+		}
+
+		const reachedRight = dx > 0 && scrollAfter >= scrollMax - 1
+		const reachedLeft = dx < 0 && scrollAfter <= 1
+
+		if (reachedRight)
+			return `✅ Scrolled page by ${scrolled}px. Reached the right edge of the page.`
+		if (reachedLeft) return `✅ Scrolled page by ${scrolled}px. Reached the left edge of the page.`
+		return `✅ Scrolled page horizontally by ${scrolled}px.`
+	} else {
+		// Container scroll
+		const warningMsg = `The document is not scrollable. Falling back to container scroll.`
+		console.log(`[PageController] ${warningMsg}`)
+
+		const scrollBefore = el!.scrollLeft
+		const scrollMax = el!.scrollWidth - el!.clientWidth
+
+		el!.scrollBy({ left: dx, behavior: 'smooth' })
+		await waitFor(0.1)
+
+		const scrollAfter = el!.scrollLeft
+		const scrolled = scrollAfter - scrollBefore
+
+		if (Math.abs(scrolled) < 1) {
+			return dx > 0
+				? `⚠️ ${warningMsg} Already at the right edge of container (${el!.tagName}), cannot scroll right further.`
+				: `⚠️ ${warningMsg} Already at the left edge of container (${el!.tagName}), cannot scroll left further.`
+		}
+
+		const reachedRight = dx > 0 && scrollAfter >= scrollMax - 1
+		const reachedLeft = dx < 0 && scrollAfter <= 1
+
+		if (reachedRight)
+			return `✅ ${warningMsg} Scrolled container (${el!.tagName}) by ${scrolled}px. Reached the right edge.`
+		if (reachedLeft)
+			return `✅ ${warningMsg} Scrolled container (${el!.tagName}) by ${scrolled}px. Reached the left edge.`
+		return `✅ ${warningMsg} Scrolled container (${el!.tagName}) horizontally by ${scrolled}px.`
+	}
+}
+
+// ======= Element Plus 组件检测 / Element Plus component detection =======
+
+/**
+ * 检测元素是否为 Element Plus 日期选择器。
+ * Detect if element is an Element Plus date picker.
+ */
+function isElementPlusDatePicker(element: HTMLElement): boolean {
+	// 检查元素自身或其祖先是否有 date picker 类名 / Check if element or ancestor has date picker class
+	const className = element.className || ''
+	const isDatePickerClass = /\b(el-date-editor|el-date-picker|date-picker)\b/i.test(className)
+	if (isDatePickerClass) return true
+
+	// 检查祖先元素 / Check ancestor elements
+	const parent = element.parentElement
+	if (parent) {
+		const parentClassName = parent.className || ''
+		if (/\b(el-date-editor|el-date-picker)\b/i.test(parentClassName)) return true
+	}
+
+	return false
+}
+
+/**
+ * 检测元素是否为 Element Plus Select 组件。
+ * Detect if element is an Element Plus Select component.
+ */
+function isElementPlusSelect(element: HTMLElement): boolean {
+	return Boolean(
+		element.closest('.el-select, .el-select__wrapper')
+	)
+}
+
+/**
+ * 检测元素是否为 Element Plus 弹出触发器。
+ * Detect if element is an Element Plus popup trigger.
+ */
+function isElementPlusPopupTrigger(element: HTMLElement): boolean {
+	return Boolean(
+		element.closest('.el-select, .el-select__wrapper, .el-date-editor, .el-picker, .el-input__wrapper')
+	)
+}
+
+// ======= 下拉检测 / Dropdown detection =======
+
+/**
+ * 判断元素是否像下拉菜单。
+ * Determine if element is likely a dropdown element.
  */
 function isLikelyDropdownElement(element: HTMLElement): boolean {
-  if (element instanceof HTMLSelectElement) return true;
+	if (element instanceof HTMLSelectElement) return true
 
-  const role = element.getAttribute("role")?.toLowerCase();
-  if (role && ["combobox", "listbox", "option"].includes(role)) return true;
+	const role = element.getAttribute('role')?.toLowerCase()
+	if (role && ['combobox', 'listbox', 'option'].includes(role)) return true
 
-  const ariaHasPopup = element.getAttribute("aria-haspopup")?.toLowerCase();
-  if (
-    ariaHasPopup &&
-    ["listbox", "menu", "tree", "dialog"].includes(ariaHasPopup)
-  ) {
-    return true;
-  }
+	const ariaHasPopup = element.getAttribute('aria-haspopup')?.toLowerCase()
+	if (ariaHasPopup && ['listbox', 'menu', 'tree', 'dialog'].includes(ariaHasPopup)) return true
 
-  const key = `${element.className} ${element.id}`.toLowerCase();
-  return /(select|dropdown|combobox|option-list|menu-item)/.test(key);
+	const key = `${element.className} ${element.id}`.toLowerCase()
+	return /(select|dropdown|combobox|option-list|menu-item)/.test(key)
 }
 
 /**
- * 判断元素是否是下拉面板中的具体选项，而不是触发器? * Determine whether the element is a concrete dropdown option rather than a trigger.
+ * 判断点击后是否应终止批量操作（例如打开了下拉菜单）。
+ * Determine if batch should end after a click (e.g., dropdown opened).
  */
-function isDropdownOptionElement(element: HTMLElement): boolean {
-  const role = element.getAttribute("role")?.toLowerCase();
-  if (role === "option") return true;
-
-  if (element.tagName.toLowerCase() === "option") return true;
-
-  if (element.tagName.toLowerCase() === "li") {
-    const dropdownParent = element.closest(
-      '[class*="select-dropdown"], [class*="select__popper"], [class*="dropdown-menu"], [role="listbox"]',
-    );
-    if (dropdownParent) return true;
-  }
-
-  return false;
+function shouldEndBatchAfterClick(action: AgentAction, element: HTMLElement, nextAction?: AgentAction): boolean {
+	if (action.tool !== 'click' || !nextAction) return false
+	return isLikelyDropdownElement(element)
 }
 
-function isPopupTriggerElement(element: HTMLElement): boolean {
-  if (isDropdownOptionElement(element)) return false;
-  if (element instanceof HTMLSelectElement) return true;
-
-  const role = element.getAttribute("role")?.toLowerCase();
-  if (role === "combobox") return true;
-
-  const ariaHasPopup = element.getAttribute("aria-haspopup")?.toLowerCase();
-  return (
-    !!ariaHasPopup &&
-    ["listbox", "menu", "tree", "dialog"].includes(ariaHasPopup)
-  );
-}
-
-function isElementPlusPopupTrigger(element: HTMLElement): boolean {
-  return Boolean(
-    element.closest(
-      ".el-select, .el-select__wrapper, .el-date-editor, .el-picker, .el-input__wrapper",
-    ),
-  );
-}
-
-function shouldRetryPopupTriggerClick(element: HTMLElement): boolean {
-  return isPopupTriggerElement(element) && isElementPlusPopupTrigger(element);
-}
-
-function getPopupStateProbeTargets(element: HTMLElement): HTMLElement[] {
-  const targets: HTMLElement[] = [element];
-  const controlsId = element.getAttribute("aria-controls");
-  if (controlsId) {
-    const controlled = document.getElementById(controlsId);
-    if (controlled instanceof HTMLElement) {
-      targets.push(controlled);
-    }
-  }
-
-  const popupType = element.getAttribute("aria-haspopup")?.toLowerCase();
-  if (popupType === "listbox") {
-    for (const candidate of document.querySelectorAll(
-      '[role="listbox"], .el-select__popper, .el-select-dropdown',
-    )) {
-      if (candidate instanceof HTMLElement) {
-        targets.push(candidate);
-      }
-    }
-  }
-
-  if (popupType === "dialog") {
-    for (const candidate of document.querySelectorAll(
-      '.el-picker__popper, .el-date-picker__popper, .el-picker-panel, [role="dialog"]',
-    )) {
-      if (candidate instanceof HTMLElement) {
-        targets.push(candidate);
-      }
-    }
-  }
-
-  return targets;
-}
-
-function hasPopupOpened(element: HTMLElement): boolean {
-  const expanded = element.getAttribute("aria-expanded")?.toLowerCase();
-  if (expanded === "true") return true;
-
-  return getPopupStateProbeTargets(element).some((target) =>
-    isVisibleElement(target),
-  );
-}
-
-function getPopupTriggerCandidates(element: HTMLElement): HTMLElement[] {
-  const candidates = [
-    element,
-    element.closest(".el-input__wrapper"),
-    element.closest(".el-select__wrapper"),
-    element.closest(".el-select"),
-    element.closest(".el-date-editor"),
-    element.closest(".el-picker"),
-    element.parentElement,
-  ];
-
-  const seen = new Set<HTMLElement>();
-  const deduped: HTMLElement[] = [];
-  for (const candidate of candidates) {
-    if (!(candidate instanceof HTMLElement) || seen.has(candidate)) continue;
-    seen.add(candidate);
-    deduped.push(candidate);
-  }
-  return deduped;
-}
-
-async function retryPopupTriggerClick(element: HTMLElement): Promise<void> {
-  for (const candidate of getPopupTriggerCandidates(element)) {
-    candidate.dispatchEvent(
-      new MouseEvent("mouseenter", { bubbles: true, cancelable: true }),
-    );
-    candidate.dispatchEvent(
-      new MouseEvent("mouseover", { bubbles: true, cancelable: true }),
-    );
-    candidate.dispatchEvent(
-      new MouseEvent("mousedown", { bubbles: true, cancelable: true }),
-    );
-    candidate.focus?.();
-    candidate.dispatchEvent(
-      new MouseEvent("mouseup", { bubbles: true, cancelable: true }),
-    );
-    candidate.click();
-
-    await waitFor(0.15);
-    if (hasPopupOpened(element) || hasPopupOpened(candidate)) {
-      return;
-    }
-  }
-}
+// ======= 执行单个操作 / Execute single action =======
 
 /**
- * 判断点击动作是否应该作为批次边界�? * Detect whether a click should end the current batch to preserve dropdown state.
- */
-function shouldEndBatchAfterClick(
-  action: AgentAction,
-  element: HTMLElement,
-  nextAction?: AgentAction,
-): boolean {
-  if (action.tool !== "click" || !nextAction) return false;
-  return isLikelyDropdownElement(element);
-}
-
-/**
- * 计算 click 动作是否应在结束后失�?
- * Decide whether click should blur after completion
- */
-function shouldBlurAfterClick(
-  element: HTMLElement,
-  params: Record<string, unknown>,
-  nextAction?: AgentAction,
-): boolean {
-  const explicit = readBlurParam(params);
-  if (explicit !== undefined) return explicit;
-
-  // 下拉交互默认不失焦，避免“展开后下一步点选项”被提前收起
-  // Keep focus for dropdown flows to avoid collapsing before option click
-  if (isLikelyDropdownElement(element)) return false;
-
-  // 若下一步紧接着还有交互，默认保持焦点连续性
-  // Keep focus continuity when another interactive action follows immediately
-  if (
-    nextAction &&
-    ["click", "input", "select", "scroll", "scroll_horizontally"].includes(
-      nextAction.tool,
-    )
-  ) {
-    return false;
-  }
-
-  return true;
-}
-
-/**
- * 垂直滚动（对齐 page-agent 实现）
- * Scroll vertically (aligned with page-agent)
+ * 执行单个代理操作，分发到对应的 DOM 操作。
+ * 包含 Element Plus 和 Vue 的特殊处理。
  *
- * 支持元素级和页面级滚动，会自动检测可滚动容器（CSS overflow 属性）
- * Supports element-level and page-level scrolling, auto-detects scrollable
- * containers via CSS overflow properties
- */
-export async function scrollVertically(
-  down: boolean,
-  scrollAmount: number,
-  element?: HTMLElement | null,
-): Promise<string> {
-  // 元素级滚动：沿 DOM 树向上查找可滚动容器 / Element scroll: walk up DOM to find scrollable container
-  if (element) {
-    let currentElement: HTMLElement | null = element;
-    let attempts = 0;
-    const dy = scrollAmount;
-
-    while (currentElement && attempts < 10) {
-      const computedStyle = window.getComputedStyle(currentElement);
-      const hasScrollableY = /(auto|scroll|overlay)/.test(
-        computedStyle.overflowY,
-      );
-      const canScrollVertically =
-        currentElement.scrollHeight > currentElement.clientHeight;
-
-      if (hasScrollableY && canScrollVertically) {
-        const beforeScroll = currentElement.scrollTop;
-        const maxScroll =
-          currentElement.scrollHeight - currentElement.clientHeight;
-        let amount = dy / 3;
-
-        if (amount > 0) {
-          amount = Math.min(amount, maxScroll - beforeScroll);
-        } else {
-          amount = Math.max(amount, -beforeScroll);
-        }
-
-        currentElement.scrollTop = beforeScroll + amount;
-        const actualDelta = currentElement.scrollTop - beforeScroll;
-
-        if (Math.abs(actualDelta) > 0.5) {
-          return `Scrolled container (${currentElement.tagName}) by ${actualDelta}px`;
-        }
-      }
-
-      if (
-        currentElement === document.body ||
-        currentElement === document.documentElement
-      )
-        break;
-      currentElement = currentElement.parentElement as HTMLElement | null;
-      attempts++;
-    }
-
-    return `No scrollable container found for element (${element.tagName})`;
-  }
-
-  // 页面级滚动：查找可滚动的容器或回退到 document / Page scroll: find scrollable container or fallback
-  const dy = scrollAmount;
-  const bigEnough = (el: HTMLElement) =>
-    el.clientHeight >= window.innerHeight * 0.5;
-  const canScroll = (el: HTMLElement | null): boolean =>
-    !!el &&
-    /(auto|scroll|overlay)/.test(getComputedStyle(el).overflowY) &&
-    el.scrollHeight > el.clientHeight &&
-    bigEnough(el);
-
-  // 从当前焦点元素向上查找 / Walk up from currently focused element
-  let el: HTMLElement | null = document.activeElement as HTMLElement | null;
-  while (el && !canScroll(el) && el !== document.body)
-    el = el.parentElement as HTMLElement | null;
-
-  // 如果找不到，全局查找或回退到文档根 / If not found, global search or fallback to document root
-  if (!canScroll(el)) {
-    el =
-      Array.from(document.querySelectorAll<HTMLElement>("*")).find((e) =>
-        canScroll(e),
-      ) ||
-      (document.scrollingElement as HTMLElement) ||
-      document.documentElement;
-  }
-
-  if (
-    el === document.scrollingElement ||
-    el === document.documentElement ||
-    el === document.body
-  ) {
-    // 页面级滚动 / Page-level scroll
-    const scrollBefore = window.scrollY;
-    const scrollMax =
-      document.documentElement.scrollHeight - window.innerHeight;
-
-    window.scrollBy(0, dy);
-
-    const scrollAfter = window.scrollY;
-    const scrolled = scrollAfter - scrollBefore;
-
-    if (Math.abs(scrolled) < 1) {
-      return dy > 0
-        ? "Already at the bottom of the page, cannot scroll down further."
-        : "Already at the top of the page, cannot scroll up further.";
-    }
-
-    const reachedBottom = dy > 0 && scrollAfter >= scrollMax - 1;
-    const reachedTop = dy < 0 && scrollAfter <= 1;
-
-    if (reachedBottom)
-      return `Scrolled page by ${scrolled}px. Reached the bottom of the page.`;
-    if (reachedTop)
-      return `Scrolled page by ${scrolled}px. Reached the top of the page.`;
-    return `Scrolled page by ${scrolled}px.`;
-  } else {
-    // 容器级滚动 / Container-level scroll
-    const container = el!;
-    const scrollBefore = container.scrollTop;
-    const scrollMax = container.scrollHeight - container.clientHeight;
-
-    container.scrollBy({ top: dy, behavior: "smooth" });
-    await waitFor(0.1);
-
-    const scrollAfter = container.scrollTop;
-    const scrolled = scrollAfter - scrollBefore;
-
-    if (Math.abs(scrolled) < 1) {
-      return dy > 0
-        ? `Already at the bottom of container (${container.tagName}), cannot scroll down further.`
-        : `Already at the top of container (${container.tagName}), cannot scroll up further.`;
-    }
-
-    const reachedBottom = dy > 0 && scrollAfter >= scrollMax - 1;
-    const reachedTop = dy < 0 && scrollAfter <= 1;
-
-    if (reachedBottom)
-      return `Scrolled container (${container.tagName}) by ${scrolled}px. Reached the bottom.`;
-    if (reachedTop)
-      return `Scrolled container (${container.tagName}) by ${scrolled}px. Reached the top.`;
-    return `Scrolled container (${container.tagName}) by ${scrolled}px.`;
-  }
-}
-
-/**
- * 水平滚动（对齐 page-agent 实现）
- * Scroll horizontally (aligned with page-agent)
- */
-export async function scrollHorizontally(
-  right: boolean,
-  scrollAmount: number,
-  element?: HTMLElement | null,
-): Promise<string> {
-  // 元素级滚动 / Element-level scroll
-  if (element) {
-    let currentElement: HTMLElement | null = element;
-    let attempts = 0;
-    const dx = right ? scrollAmount : -scrollAmount;
-
-    while (currentElement && attempts < 10) {
-      const computedStyle = window.getComputedStyle(currentElement);
-      const hasScrollableX = /(auto|scroll|overlay)/.test(
-        computedStyle.overflowX,
-      );
-      const canScrollHorizontally =
-        currentElement.scrollWidth > currentElement.clientWidth;
-
-      if (hasScrollableX && canScrollHorizontally) {
-        const beforeScroll = currentElement.scrollLeft;
-        const maxScroll =
-          currentElement.scrollWidth - currentElement.clientWidth;
-        let amount = dx / 3;
-
-        if (amount > 0) {
-          amount = Math.min(amount, maxScroll - beforeScroll);
-        } else {
-          amount = Math.max(amount, -beforeScroll);
-        }
-
-        currentElement.scrollLeft = beforeScroll + amount;
-        const actualDelta = currentElement.scrollLeft - beforeScroll;
-
-        if (Math.abs(actualDelta) > 0.5) {
-          return `Scrolled container (${currentElement.tagName}) horizontally by ${actualDelta}px`;
-        }
-      }
-
-      if (
-        currentElement === document.body ||
-        currentElement === document.documentElement
-      )
-        break;
-      currentElement = currentElement.parentElement as HTMLElement | null;
-      attempts++;
-    }
-
-    return `No horizontally scrollable container found for element (${element.tagName})`;
-  }
-
-  // 页面级滚动 / Page-level scroll
-  const dx = right ? scrollAmount : -scrollAmount;
-  const bigEnough = (el: HTMLElement) =>
-    el.clientWidth >= window.innerWidth * 0.5;
-  const canScroll = (el: HTMLElement | null): boolean =>
-    !!el &&
-    /(auto|scroll|overlay)/.test(getComputedStyle(el).overflowX) &&
-    el.scrollWidth > el.clientWidth &&
-    bigEnough(el);
-
-  let el: HTMLElement | null = document.activeElement as HTMLElement | null;
-  while (el && !canScroll(el) && el !== document.body)
-    el = el.parentElement as HTMLElement | null;
-
-  if (!canScroll(el)) {
-    el =
-      Array.from(document.querySelectorAll<HTMLElement>("*")).find((e) =>
-        canScroll(e),
-      ) ||
-      (document.scrollingElement as HTMLElement) ||
-      document.documentElement;
-  }
-
-  if (
-    el === document.scrollingElement ||
-    el === document.documentElement ||
-    el === document.body
-  ) {
-    const scrollBefore = window.scrollX;
-    const scrollMax = document.documentElement.scrollWidth - window.innerWidth;
-
-    window.scrollBy(dx, 0);
-
-    const scrollAfter = window.scrollX;
-    const scrolled = scrollAfter - scrollBefore;
-
-    if (Math.abs(scrolled) < 1) {
-      return dx > 0
-        ? "Already at the right edge of the page, cannot scroll right further."
-        : "Already at the left edge of the page, cannot scroll left further.";
-    }
-
-    const reachedRight = dx > 0 && scrollAfter >= scrollMax - 1;
-    const reachedLeft = dx < 0 && scrollAfter <= 1;
-
-    if (reachedRight)
-      return `Scrolled page by ${scrolled}px. Reached the right edge of the page.`;
-    if (reachedLeft)
-      return `Scrolled page by ${scrolled}px. Reached the left edge of the page.`;
-    return `Scrolled page horizontally by ${scrolled}px.`;
-  } else {
-    const container = el!;
-    const scrollBefore = container.scrollLeft;
-    const scrollMax = container.scrollWidth - container.clientWidth;
-
-    container.scrollBy({ left: dx, behavior: "smooth" });
-    await waitFor(0.1);
-
-    const scrollAfter = container.scrollLeft;
-    const scrolled = scrollAfter - scrollBefore;
-
-    if (Math.abs(scrolled) < 1) {
-      return dx > 0
-        ? `Already at the right edge of container (${container.tagName}), cannot scroll right further.`
-        : `Already at the left edge of container (${container.tagName}), cannot scroll left further.`;
-    }
-
-    const reachedRight = dx > 0 && scrollAfter >= scrollMax - 1;
-    const reachedLeft = dx < 0 && scrollAfter <= 1;
-
-    if (reachedRight)
-      return `Scrolled container (${container.tagName}) by ${scrolled}px. Reached the right edge.`;
-    if (reachedLeft)
-      return `Scrolled container (${container.tagName}) by ${scrolled}px. Reached the left edge.`;
-    return `Scrolled container (${container.tagName}) horizontally by ${scrolled}px.`;
-  }
-}
-
-/**
- * 在页面上执行单个操作
- * Execute a single action on the page
+ * Execute a single agent action by dispatching to the corresponding DOM operation.
+ * Includes Element Plus and Vue special handling.
  */
 export async function executeAction(
-  action: AgentAction,
-  selectorMap: Map<number, Element>,
-  options: { nextAction?: AgentAction } = {},
+	action: AgentAction,
+	selectorMap: Map<number, InteractiveElementDomNode>,
+	options: { nextAction?: AgentAction } = {}
 ): Promise<ActionResult> {
-  try {
-    const { tool, params } = action;
+	try {
+		const { tool, params } = action
 
-    /**
-     * 从索引映射中获取 HTMLElement / Get HTMLElement from index map
-     */
-    function getElement(index: number): HTMLElement {
-      const el = selectorMap.get(index);
-      if (!el) throw new Error(`Element [${index}] not found`);
-      if (!(el instanceof HTMLElement))
-        throw new Error(`Element [${index}] is not an HTMLElement`);
-      return el;
-    }
+		function getEl(index: number): HTMLElement {
+			return getElementByIndex(selectorMap, index)
+		}
 
-    switch (tool) {
-      // 点击操作 / Click action
-      case "click": {
-        const el = getElement(params.index as number);
-        const blurAfter = shouldBlurAfterClick(el, params, options.nextAction);
-        await clickElement(el, { blurAfter });
+		switch (tool) {
+			case 'click': {
+				const el = getEl(params.index as number)
+				const shouldBlur = params.blur !== false // 默认 blur / Default to blur
 
-        // 处理新标签页链接 / Handle links that open in new tabs
-        if (el instanceof HTMLAnchorElement && el.target === "_blank") {
-          return {
-            action,
-            success: true,
-            output: `Clicked element [${params.index}]. Link opened in a new tab.`,
-          };
-        }
-        return {
-          action,
-          success: true,
-          output: `Clicked element [${params.index}]`,
-        };
-      }
+				// Element Plus 日期选择器特殊处理 / Element Plus date picker needs special handling
+				if (isElementPlusDatePicker(el)) {
+					const input = el.querySelector('.el-input__inner') as HTMLInputElement | null
+					if (input) {
+						input.focus()
+						input.dispatchEvent(new MouseEvent('focus', { bubbles: true }))
+						input.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))
+						input.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }))
+						input.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+						await waitFor(0.3)
+						if (shouldBlur) input.blur()
+						return { action, success: true, output: `Clicked Element Plus date picker [${params.index}]` }
+					}
+				}
 
-      // 输入操作 / Input action
-      case "input": {
-        const el = getElement(params.index as number);
-        const blurAfter = readBlurParam(params) ?? true;
-        await inputText(el, params.text as string, { blurAfter });
-        return {
-          action,
-          success: true,
-          output: `Input "${params.text}" into [${params.index}]`,
-        };
-      }
+				// Element Plus Select 特殊处理 / Element Plus select needs special handling
+				if (isElementPlusSelect(el)) {
+					const input = el.querySelector('.el-input__inner') as HTMLInputElement | null
+					if (input) {
+						input.focus()
+						input.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))
+						input.dispatchEvent(new MouseEvent('mouseup', { bubbles: true }))
+						input.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+						await waitFor(0.3)
+						if (shouldBlur) input.blur()
+						return { action, success: true, output: `Clicked Element Plus select [${params.index}]` }
+					}
+				}
 
-      // 选择操作（仅原生 <select>，自定义下拉由 LLM 通过两步 click 完成）
-      // Select action (native <select> only; custom dropdowns handled by LLM via two-step clicks)
-      case "select": {
-        const el = getElement(params.index as number);
-        const optionText = (params.value || params.optionText) as string;
-        const blurAfter = readBlurParam(params) ?? true;
-        await selectOption(el as HTMLSelectElement, optionText, { blurAfter });
-        return {
-          action,
-          success: true,
-          output: `Selected "${optionText}" in [${params.index}]`,
-        };
-      }
+				await clickElement(el)
+				// blur=false 时保留焦点，用于下拉菜单等中间步骤 / Keep focus when blur=false for intermediate dropdown steps
+				if (shouldBlur) el.blur()
 
-      // 垂直滚动操作 / Vertical scroll action
-      case "scroll": {
-        const el =
-          params.index != null ? getElement(params.index as number) : null;
-        const down = params.direction === "down" || params.down === true;
-        const amount =
-          (params.amount as number) ||
-          (params.pixels as number) ||
-          window.innerHeight;
-        const msg = await scrollVertically(down, down ? amount : -amount, el);
-        return { action, success: true, output: msg };
-      }
+				if (isAnchorElement(el) && el.target === '_blank') {
+					return { action, success: true, output: `Clicked element [${params.index}]. Link opened in a new tab.` }
+				}
+				return { action, success: true, output: `Clicked element [${params.index}]` }
+			}
 
-      // 水平滚动操作 / Horizontal scroll action
-      case "scroll_horizontally": {
-        const el =
-          params.index != null ? getElement(params.index as number) : null;
-        const isRight = params.direction === "right" || params.right === true;
-        const amount =
-          (params.amount as number) || (params.pixels as number) || 300;
-        const msg = await scrollHorizontally(isRight, amount, el);
-        return { action, success: true, output: msg };
-      }
+			case 'input': {
+				const el = getEl(params.index as number)
+				const shouldBlurInput = params.blur !== false // 默认 blur / Default to blur
+				await inputTextElement(el, params.text as string)
+				if (shouldBlurInput) el.blur()
+				return { action, success: true, output: `Input "${params.text}" into [${params.index}]` }
+			}
 
-      // 等待操作 / Wait action
-      case "wait": {
-        // 优先使用 ms，其次使用 seconds（转换为毫秒）/ Prefer ms, then seconds (converted to milliseconds)
-        const rawMs = params.ms as number | undefined;
-        const rawSeconds = params.seconds as number | undefined;
-        const ms =
-          typeof rawMs === "number" && Number.isFinite(rawMs) && rawMs >= 0
-            ? rawMs
-            : typeof rawSeconds === "number" &&
-                Number.isFinite(rawSeconds) &&
-                rawSeconds >= 0
-              ? rawSeconds * 1000
-              : 1000;
-        await new Promise((resolve) => setTimeout(resolve, ms));
-        return { action, success: true, output: `Waited ${ms}ms` };
-      }
+			case 'select': {
+				const el = getEl(params.index as number)
+				const shouldBlurSelect = params.blur !== false // 默认 blur / Default to blur
+				const optionText = (params.value || params.optionText) as string
+				await selectOptionElement(el as HTMLSelectElement, optionText)
+				if (shouldBlurSelect) el.blur()
+				return { action, success: true, output: `Selected "${optionText}" in [${params.index}]` }
+			}
 
-      // 执行 JavaScript 代码 / Execute JavaScript code
-      case "execute_javascript": {
-        // 支持 async/await 语法 / Support async/await syntax
-        const asyncFn = eval(`(async () => { ${params.code as string} })`);
-        const result = await asyncFn();
-        return {
-          action,
-          success: true,
-          output: `Executed JavaScript. Result: ${String(result)}`,
-        };
-      }
+			case 'scroll': {
+				const el = params.index != null ? getEl(params.index as number) : null
+				const down = params.direction === 'down' || params.down === true
+				const amount = (params.amount as number) || (params.pixels as number) || window.innerHeight
+				const msg = await scrollVertically(down ? amount : -amount, el)
+				return { action, success: true, output: msg }
+			}
 
-      // 任务完成标记 / Task completion marker
-      case "done": {
-        return {
-          action,
-          success: true,
-          // 兼容 message（现行）与 data（历史）字段 / Support both message (current) and data (legacy)
-          output:
-            (params.message as string) ||
-            (params.data as string) ||
-            "Task completed",
-        };
-      }
+			case 'scroll_horizontally': {
+				const el = params.index != null ? getEl(params.index as number) : null
+				const isRight = params.direction === 'right' || params.right === true
+				const amount = (params.amount as number) || (params.pixels as number) || 300
+				const msg = await scrollHorizontally(isRight ? amount : -amount, el)
+				return { action, success: true, output: msg }
+			}
 
-      // 向用户提问（当前版本仅透传，不阻塞流程）/ Ask user (pass-through for now, non-blocking)
-      case "ask_user": {
-        const question =
-          (params.question as string) || "Need user clarification";
-        return {
-          action,
-          success: true,
-          output: `Ask user: ${question}`,
-        };
-      }
+			case 'wait': {
+				const rawMs = params.ms as number | undefined
+				const rawSeconds = params.seconds as number | undefined
+				const ms =
+					typeof rawMs === 'number' && Number.isFinite(rawMs) && rawMs >= 0
+						? rawMs
+						: typeof rawSeconds === 'number' && Number.isFinite(rawSeconds) && rawSeconds >= 0
+							? rawSeconds * 1000
+							: 1000
+				await new Promise((resolve) => setTimeout(resolve, ms))
+				return { action, success: true, output: `Waited ${ms}ms` }
+			}
 
-      // 未知工具类型 / Unknown tool type
-      default:
-        // 工具不匹配时兜底跳过，避免打断整批动作 / Skip unknown tools to avoid breaking the whole batch
-        return {
-          action,
-          success: true,
-          output: `Skipped unknown tool: ${tool}`,
-        };
-    }
-  } catch (err) {
-    return {
-      action,
-      success: false,
-      error: err instanceof Error ? err.message : String(err),
-    };
-  }
+			case 'execute_javascript': {
+				// eslint-disable-next-line @typescript-eslint/no-implied-eval
+				const asyncFn = eval(`(async () => { ${params.code as string} })`)
+				const result = await asyncFn()
+				return { action, success: true, output: `Executed JavaScript. Result: ${String(result)}` }
+			}
+
+			case 'done': {
+				return {
+					action,
+					success: true,
+					output: (params.message as string) || 'Task completed',
+				}
+			}
+
+			case 'ask_user': {
+				const question = (params.question as string) || 'Need user clarification'
+				return { action, success: true, output: `Ask user: ${question}` }
+			}
+
+			default:
+				return { action, success: true, output: `Skipped unknown tool: ${tool}` }
+		}
+	} catch (err) {
+		return {
+			action,
+			success: false,
+			error: err instanceof Error ? err.message : String(err),
+		}
+	}
 }
 
+// ======= 执行批量操作 / Execute batch actions =======
+
 /**
- * 按顺序执行一批操作（遇错即停）
- * Execute a batch of actions sequentially (fail-fast)
+ * 批量执行代理操作，遇到错误则中止（fail-fast）。
+ * 在点击下拉触发器后会提前结束批量。
+ *
+ * Execute a batch of agent actions with fail-fast behavior.
+ * Ends batch early after clicking a dropdown trigger.
  */
 export async function executeBatch(
-  actions: AgentAction[],
-  selectorMap: Map<number, Element>,
-  onProgress?: (index: number, result: ActionResult) => void,
+	actions: AgentAction[],
+	selectorMap: Map<number, InteractiveElementDomNode>,
+	onProgress?: (index: number, result: ActionResult) => void
 ): Promise<BatchResult> {
-  const results: ActionResult[] = [];
+	const results: ActionResult[] = []
 
-  for (let i = 0; i < actions.length; i++) {
-    const action = actions[i];
-    const nextAction = i < actions.length - 1 ? actions[i + 1] : undefined;
-    const result = await executeAction(action, selectorMap, {
-      nextAction,
-    });
-    results.push(result);
-    onProgress?.(i, result);
+	for (let i = 0; i < actions.length; i++) {
+		const action = actions[i]
+		const nextAction = i < actions.length - 1 ? actions[i + 1] : undefined
 
-    // 遇到错误立即停止 / Stop immediately on error
-    if (!result.success) break;
+		const result = await executeAction(action, selectorMap, { nextAction })
+		results.push(result)
+		onProgress?.(i, result)
 
-    // 点击下拉触发器后立即结束当前批次，保留下拉面板供下一轮观察�?    // End the current batch right after opening a dropdown trigger so the next
-    // observation can still see the expanded options overlay.
-    if (action.tool === "click") {
-      const index = action.params.index as number | undefined;
-      const element =
-        typeof index === "number" ? selectorMap.get(index) : undefined;
-      if (
-        element instanceof HTMLElement &&
-        shouldEndBatchAfterClick(action, element, nextAction)
-      ) {
-        break;
-      }
-    }
+		// 遇到错误立即中止 / Fail-fast on error
+		if (!result.success) break
 
-    // 操作之间加入短暂延迟以确�?DOM 稳定 / Small delay between actions for DOM stability
-    if (i < actions.length - 1) {
-      await new Promise((resolve) => setTimeout(resolve, 100));
-    }
-  }
+		// 点击下拉触发器后结束批量 / End batch after clicking dropdown trigger
+		if (action.tool === 'click') {
+			const index = action.params.index as number | undefined
+			const element = typeof index === 'number' ? selectorMap.get(index)?.ref : undefined
+			if (element instanceof HTMLElement && shouldEndBatchAfterClick(action, element, nextAction)) {
+				break
+			}
+		}
 
-  return {
-    results,
-    completedCount: results.filter((r) => r.success).length,
-  };
+		// 操作间的短暂延迟 / Small delay between actions
+		if (i < actions.length - 1) {
+			await new Promise((resolve) => setTimeout(resolve, 100))
+		}
+	}
+
+	return {
+		results,
+		completedCount: results.filter((r) => r.success).length,
+	}
 }

@@ -1,168 +1,82 @@
-# Paget - AI Page Agent
+# paget 项目规范
 
-## Project Overview
+> **注意**: 当前文件夹名为 `paget2` 是为了与同目录下的原 `paget` 项目区分。项目重构完成后将重命名为 `paget` 并推送到原 `paget` 的 git 仓库。
+> 
+> **所有代码、注释、文档中涉及的项目名称必须使用 `paget`，禁止使用 `paget2`**。
 
-Paget is an AI-powered web page automation agent built on a reflection-before-action architecture. It observes page state, reflects on progress, then executes batch actions — all orchestrated through a client-server model with WebSocket communication. Session state is kept in memory; the current setup uses no external storage.
+## 必须遵循的文档
 
-## Monorepo Structure
+- [ARCHITECTURE.md](./ARCHITECTURE.md) - 架构设计
+- [DEVELOPMENT_GUIDELINES.md](./DEVELOPMENT_GUIDELINES.md) - 开发规范
 
-```
-packages/
-├── shared/           # Shared types & constants (frontend + backend)
-├── page-controller/  # DOM extraction & element interaction (runs in browser)
-├── ui/               # Vue 3 chat UI (entry point + user config)
-└── server/           # NestJS backend (LLM, Agent, Prompt, in-memory Session, WebSocket)
-```
+## 关键规范摘要
 
-## Tech Stack
+### 代码规范
 
-| Layer | Technology |
-|-------|-----------|
-| Frontend | Vue 3 + TypeScript + Vite + Pinia |
-| Backend | NestJS + LangChain.js |
-| Realtime | Socket.IO (WebSocket) |
-| Monorepo | pnpm workspace |
+1. **注释格式**: 所有代码注释必须为 `中文 | 英文` 形式
+2. **禁止 any 类型**: 必须使用具体类型，如需使用必须添加注释说明原因
+3. **禁止 default export**: 除 Vue SFC 外禁止使用 default export
+4. **strict 模式**: TypeScript 严格模式
 
-## Architecture Key Concepts
+### 类型管理
 
-### Reflection-Before-Action Loop
+5. **跨包类型必须放入 @paget/shared**: 如果类型被 2 个或以上包使用，必须放入 shared
+6. **每个模块/组件必须有 types/index.ts**: 统一管理模块内类型
 
-Every agent step outputs:
-1. `evaluation_previous_goal` — assess previous action result
-2. `memory` — key info to carry forward
-3. `next_goal` — clear next objective
-4. `actions[]` — one or more actions to execute (batch support)
+### 界面规范
 
-### Event Model (3 categories)
+7. **UI/Website 用户界面**: 纯中文，不允许混合英文
+8. **CSS 变量前缀**: 使用 `--paget-`
 
-- **statuschange** — agent lifecycle: `idle → running → completed/error`
-- **historychange** — session-state events (steps, observations, errors) used as LLM context
-- **activity** — transient UI feedback (thinking, executing, executed) NOT stored in session history or sent to LLM
+### 包结构
 
-### Data Flow
+9. **遵循包依赖原则**:
+   - shared 无依赖
+   - page-controller → shared
+   - llm → shared
+   - server → shared + llm
+   - ui → shared + page-controller
+   - website → shared
+10. **禁止逆向/循环依赖**
 
-```
-Browser (UI + PageController)  ←— WebSocket —→  Server (Agent + LLM)
-  - Reports page state (DOM)                      - Runs reflection loop
-  - Executes batch actions                        - Calls LLM via LangChain
-  - Displays events in ChatPanel                  - Stores history in in-memory session state
-```
+### Vue 组件 (packages/ui)
 
-## Coding Conventions
-
-### Language / 语言
-
-**代码注释（Code Comments）**：
-- **双语（中文 + 英文）**，中文在前，英文在后
-- 单行格式: `// 中文说明 / English explanation`
-- 多行格式:
-  ```ts
-  /**
-   * 获取当前页面的浏览器状态快照
-   * Get a browser state snapshot of the current page
-   */
-  ```
-
-**UI 页面文案（User-facing Text）**：
-- **中文单语**，包括按钮文字、提示信息、标签等用户可见的文本
-- 后续通过 i18n 模块实现多语言切换，届时使用 `t('key')` 方式引用
-- 示例：`<button>提交</button>` 而非 `<button>提交 / Submit</button>`
-
-**其他规则**：
-- Variable names, function names, class names: **English only**
-- Commit messages: English
-- Documentation files (.md): Chinese preferred, English acceptable
-
-### TypeScript
-
-- Strict mode enabled across all packages
-- Use `interface` for data shapes, `type` for unions/intersections
-- Prefer `unknown` over `any`; if `any` is unavoidable, add a comment explaining why
-- Use Zod for runtime validation (especially in server/agent tools)
-- Enum values: UPPER_SNAKE_CASE
-- No default exports except Vue SFC files (.vue)
-
-### Vue 3 (packages/ui)
-
-- Composition API with `<script setup lang="ts">` only, no Options API
-- Component naming: PascalCase files, PascalCase in templates
-- Props: use `defineProps<T>()` with TypeScript interface
-- Emits: use `defineEmits<T>()` with typed events
-- State management: Pinia stores in `stores/`, composables in `composables/`
-- Scoped styles (`<style scoped>`) by default
-- CSS custom properties defined in `styles/variables.css`, prefix: `--paget-`
-- No Tailwind — use plain CSS with design tokens
+11. **仅使用 Composition API**: `<script setup lang="ts">`
+12. **禁止 Tailwind CSS**: 使用纯 CSS + CSS 变量
+13. **组件文件命名**: PascalCase.vue
 
 ### NestJS (packages/server)
 
-- One module per domain: `llm`, `agent`, `prompt`, `session`
-- Session data is stored in memory; there is no external storage layer
-- DTOs: `dto/*.dto.ts` with class-validator decorators
-- Services contain business logic; Controllers are thin (delegate to services)
-- WebSocket events defined in `@paget/shared` constants, not magic strings
-- Use constructor injection, avoid `@Inject()` where possible
+14. **模块结构**: module.ts + service.ts + gateway.ts
+15. **业务逻辑放 Services**: Controllers/Gateways 仅做协议 I/O
+16. **使用 @paget/shared 常量**: WebSocket 事件名必须使用 shared 中定义
 
-### Shared Package
+### Git 提交
 
-- Types only (no runtime code with side effects)
-- All WebSocket event names defined in `constants/events.ts`
-- All status enums defined in `constants/status.ts`
+17. **提交信息格式**: `type: subject` (feat, fix, docs, refactor 等)
 
-### Page Controller
-
-- No framework dependency (vanilla TypeScript, runs in any browser)
-- Framework-specific logic isolated in `patches/` directory
-- Vue patch (`patches/vue.ts`): handle v-model reactivity
-- Element Plus patch (`patches/element-plus.ts`): handle custom components
-- Batch execution stops on first error (fail-fast)
-
-## File Naming
-
-| Type | Pattern | Example |
-|------|---------|---------|
-| Vue component | PascalCase.vue | `ChatPanel.vue` |
-| Composable | camelCase.ts | `useWebSocket.ts` |
-| Pinia store | camelCase.ts | `chat.ts` |
-| NestJS module | kebab-case.*.ts | `llm.module.ts` |
-| Shared types | camelCase.ts | `agent.ts` |
-| CSS | kebab-case.css | `variables.css` |
-
-## Package Dependencies
-
-```
-@paget/ui ──→ @paget/shared
-           ──→ @paget/page-controller
-
-@paget/page-controller ──→ @paget/shared
-
-@paget/server ──→ @paget/shared
-```
-
-- `shared` has NO dependencies on other workspace packages
-- `page-controller` depends only on `shared`
-- `ui` and `server` depend on `shared`; `ui` also depends on `page-controller`
-- **Never** create circular dependencies between packages
-
-## Commands
+## 开发命令
 
 ```bash
-pnpm dev:ui          # Start frontend dev server (Vite, port 5173)
-pnpm dev:server      # Start backend dev server (NestJS watch mode)
-pnpm dev             # Start both concurrently
-pnpm build           # Build all packages
-pnpm build:shared    # Build shared package only
+pnpm dev:ui        # 启动 ui 包
+pnpm dev:server    # 启动 server 包
+pnpm dev:website   # 启动 website 包
+pnpm build         # 构建所有包
+pnpm lint          # ESLint 检查
+pnpm typecheck     # TypeScript 检查
 ```
 
-## Testing Guidelines
+## 目录结构
 
-- Unit tests: colocate with source as `*.spec.ts`
-- E2E tests: `tests/` directory at package root
-- Mock WebSocket and LLM calls in tests — never call real APIs
-
-## Important Notes
-
-- The `page-controller` package runs **in the browser** (injected into target pages), not on the server
-- The server never directly manipulates DOM — it sends action commands via WebSocket, and the client-side PageController executes them
-- LLM API keys come from environment variables, never hardcoded or committed to git
-- Server session state is in-memory only, so it resets when the process restarts
-- The `.env` file is gitignored; use `.env.example` as template
+```
+paget/
+├── packages/
+│   ├── shared/           # @paget/shared - 共享类型/常量/事件
+│   ├── page-controller/  # @paget/page-controller - DOM 操作
+│   ├── llm/             # @paget/llm - LLM 调用
+│   ├── server/          # @paget/server - NestJS 服务
+│   ├── ui/              # @paget/ui - Vue 悬浮 UI
+│   └── website/          # @paget/website - 官网
+├── ARCHITECTURE.md       # 详细架构设计
+└── DEVELOPMENT_GUIDELINES.md  # 完整开发规范
+```

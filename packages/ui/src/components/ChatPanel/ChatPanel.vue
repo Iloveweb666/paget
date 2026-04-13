@@ -177,7 +177,7 @@ function handleStop() {
 </script>
 
 <template>
-  <div class="chat-dialog">
+  <div class="chat-dialog" data-paget-ignore="true">
     <!-- 头部 / Header -->
     <ChatHeader @close="emit('close')" @open-ws-log="showWSLog = true" />
 

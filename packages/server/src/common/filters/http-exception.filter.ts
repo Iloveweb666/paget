@@ -50,6 +50,7 @@ export class GlobalExceptionFilter implements ExceptionFilter {
       const message =
         typeof exceptionResponse === 'string'
           ? exceptionResponse
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any -- HttpException.getResponse() 返回类型不确定 / HttpException.getResponse() return type is uncertain
           : (exceptionResponse as any).message || exception.message;
       body = {
         success: false,

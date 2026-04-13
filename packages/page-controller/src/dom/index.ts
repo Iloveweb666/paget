@@ -1,322 +1,569 @@
-import type { FlatDomNode, InteractiveElementDomNode, TextDomNode } from './dom_tree/types'
-
-export * from './dom_tree'
-
-/**
- * DOM 树提取配置
- * Configuration for DOM tree extraction
- */
-export interface DomExtractionConfig {
-  /** 最大遍历深度 / Maximum depth to traverse */
-  maxDepth?: number
-  /** 是否包含隐藏元素 / Whether to include hidden elements */
-  includeHidden?: boolean
-  /** 交互元素的自定义选择器 / Custom selector for interactive elements */
-  interactiveSelector?: string
-  /**
-   * 要排除的元素 CSS 选择器（匹配的元素及其子树会被跳过）
-   * CSS selector for elements to exclude (matching elements and their subtrees are skipped)
-   */
-  excludeSelector?: string
-}
-
-// TODO: 使用 MutationObserver 实现增量 DOM 扫描优化 / Incremental DOM scan via MutationObserver
-// 当前每次调用 getFlatTree 都全量遍历 DOM 树，对于 Element Plus 中后台页面（~3000-5000 节点）
-// 耗时约 30-80ms。Agent 循环中两次观察之间页面变化通常很小，可通过以下方案优化：
-// Currently getFlatTree does a full DOM traversal every call. For typical Element Plus admin
-// pages (~3000-5000 nodes), this takes ~30-80ms. Between Agent loop observations, page
-// changes are usually minimal. Optimization approach:
-//
-// 1. 初始化时注册 MutationObserver 监听 childList/attributes/subtree 变化
-//    Register MutationObserver on init to watch childList/attributes/subtree changes
-// 2. 维护脏子树根节点集合（dirtyRoots），mutation 回调中标记变化节点
-//    Maintain a dirtyRoots set, mark changed nodes in mutation callback
-// 3. getFlatTree 调用时，若无脏标记则直接返回缓存结果（<1ms）
-//    On getFlatTree call, return cached result if no dirty marks (<1ms)
-// 4. 若有脏标记，仅重新遍历脏子树并合并到缓存中（通常 2-5ms）
-//    If dirty, only re-traverse dirty subtrees and merge into cache (typically 2-5ms)
-// 5. 路由跳转等全量替换场景仍需全量扫描，此时无额外收益
-//    Full page replacement (route navigation) still requires full scan, no extra benefit
+import domTree from './dom_tree/index.js'
+import {
+	ElementDomNode,
+	FlatDomTree,
+	InteractiveElementDomNode,
+	TextDomNode,
+} from './dom_tree/type'
 
 /**
- * 用于标识元素的属性白名单（对齐 page-agent）
- * Attribute whitelist for element identification (aligned with page-agent)
- */
-const RELEVANT_ATTRIBUTES = [
-  'title', 'type', 'checked', 'name', 'role', 'value', 'placeholder',
-  'alt', 'aria-label', 'aria-expanded', 'data-state', 'aria-checked',
-  'id', 'for', 'href', 'target', 'aria-haspopup', 'aria-controls',
-  'aria-owns', 'contenteditable',
-]
-
-/**
- * 获取元素自身的直接文本内容（不递归子元素）
- * Get the element's own direct text content (non-recursive)
- */
-function getOwnTextContent(element: Element): string {
-  let text = ''
-  for (const child of element.childNodes) {
-    // 只取直接文本子节点 / Only take direct text child nodes
-    if (child.nodeType === Node.TEXT_NODE) {
-      text += child.textContent || ''
-    }
-  }
-  return text.trim()
-}
-
-/**
- * 从 DOM 中提取交互元素和文本节点的扁平树。
- * 每个交互元素会被分配一个索引编号，供 LLM 引用。
- * 非交互元素的直接文本会作为上下文文本节点输出（index=-1）。
+ * Viewport expansion for DOM tree extraction.
+ * -1 means full page (no viewport restriction)
+ * 0 means viewport only
+ * positive values expand the viewport by that many pixels
  *
- * Extract a flat tree of interactive and text nodes from the DOM.
- * Each interactive element is assigned an index for LLM reference.
- * Direct text of non-interactive elements is emitted as context text nodes (index=-1).
+ * @note Since isTopElement depends on elementFromPoint,
+ * it returns null when out of viewport, this feature has no practical use, only differ between -1 and 0
  */
-export function getFlatTree(
-  root: Element = document.body,
-  config: DomExtractionConfig = {},
-): FlatDomNode[] {
-  const { maxDepth = 50, includeHidden = false, excludeSelector } = config
-  const nodes: FlatDomNode[] = []
-  let index = 0
+const DEFAULT_VIEWPORT_EXPANSION = -1
 
-  /**
-   * 递归遍历 DOM 树 / Recursively walk the DOM tree
-   * @param insideInteractive 是否在交互元素内部，避免文本重复 / Whether inside an interactive element to avoid text duplication
-   */
-  function walk(element: Element, depth: number, insideInteractive: boolean) {
-    // 超过最大深度则停止 / Stop if max depth exceeded
-    if (depth > maxDepth) return
+export function resolveViewportExpansion(viewportExpansion?: number): number {
+	return viewportExpansion ?? DEFAULT_VIEWPORT_EXPANSION
+}
 
-    // 跳过排除的元素及其子树 / Skip excluded elements and their subtrees
-    if (excludeSelector && element.matches(excludeSelector)) return
+export interface DomConfig {
+	viewportExpansion?: number
+	interactiveBlacklist?: (Element | (() => Element))[]
+	interactiveWhitelist?: (Element | (() => Element))[]
+	includeAttributes?: string[]
+	highlightOpacity?: number
+	highlightLabelOpacity?: number
 
-    // 检查元素可见性 / Check element visibility
-    const style = window.getComputedStyle(element)
-    if (!includeHidden && (style.display === 'none' || style.visibility === 'hidden')) {
-      return
-    }
+	/**
+	 * Preserve semantic landmark tags in dehydrated output even if not interactive
+	 * @note maybe confusing for LLM combining with page scrolling, use with caution
+	 **/
+	keepSemanticTags?: boolean
+}
 
-    // 获取元素的边界矩形 / Get the element's bounding rectangle
-    const rect = element.getBoundingClientRect()
-    const isVisible = rect.width > 0 && rect.height > 0
+// TODO: corresponding roles
+const SEMANTIC_TAGS = new Set([
+	'nav',
+	'menu',
+	// 'main',
+	'header',
+	'footer',
+	'aside',
+	// 'article',
+	// 'form',
+	'dialog',
+])
 
-    const isThisInteractive = isInteractive(element)
+/**
+ * 用于检测可交互元素是否是新出现的。
+ */
+const newElementsCache = new WeakMap<HTMLElement, string>()
 
-    // 如果是交互元素，收集其信息 / If interactive, collect its info
-    if (isThisInteractive) {
-      const node: InteractiveElementDomNode = {
-        type: 'interactive',
-        index: index++,
-        tagName: element.tagName.toLowerCase(),
-        isVisible,
-        depth,
-        rect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
-        attributes: getRelevantAttributes(element),
-        ariaLabel: element.getAttribute('aria-label') || undefined,
-        placeholder: (element as HTMLInputElement).placeholder || undefined,
-        value: (element as HTMLInputElement).value || undefined,
-        isDisabled: (element as HTMLInputElement).disabled || false,
-        role: element.getAttribute('role') || undefined,
-        text: element.textContent?.trim().slice(0, 100) || undefined,
-      }
-      nodes.push(node)
-    } else if (!insideInteractive) {
-      // 非交互元素：收集直接文本作为上下文 / Non-interactive element: collect direct text as context
-      const ownText = getOwnTextContent(element)
-      if (ownText.length >= 2) {
-        const textNode: TextDomNode = {
-          type: 'text',
-          index: -1,
-          tagName: element.tagName.toLowerCase(),
-          isVisible,
-          depth,
-          text: ownText.slice(0, 100),
-        }
-        nodes.push(textNode)
-      }
-    }
+export function getFlatTree(config: DomConfig): FlatDomTree {
+	const viewportExpansion = resolveViewportExpansion(config.viewportExpansion)
 
-    // 递归处理子元素 / Recursively process child elements
-    for (const child of element.children) {
-      walk(child, depth + 1, insideInteractive || isThisInteractive)
-    }
-  }
+	const interactiveBlacklist = [] as Element[]
+	for (const item of config.interactiveBlacklist || []) {
+		if (typeof item === 'function') {
+			interactiveBlacklist.push(item())
+		} else {
+			interactiveBlacklist.push(item)
+		}
+	}
 
-  walk(root, 0, false)
-  return nodes
+	const interactiveWhitelist = [] as Element[]
+	for (const item of config.interactiveWhitelist || []) {
+		if (typeof item === 'function') {
+			interactiveWhitelist.push(item())
+		} else {
+			interactiveWhitelist.push(item)
+		}
+	}
+
+	const elements = domTree({
+		doHighlightElements: true,
+		debugMode: true,
+		focusHighlightIndex: -1,
+		viewportExpansion,
+		interactiveBlacklist,
+		interactiveWhitelist,
+		highlightOpacity: config.highlightOpacity ?? 0.0,
+		highlightLabelOpacity: config.highlightLabelOpacity ?? 0.1,
+	}) as FlatDomTree
+
+	const currentUrl = window.location.href
+
+	/**
+	 * 标记新出现的元素
+	 * @todo browser-use 使用 hash(位置，属性等信息) 来判断是否同一个元素，
+	 *       能够解决 1. 元素被删除后重新添加 2. 页面卸载 等问题。
+	 *       这里先简单做.
+	 */
+	for (const nodeId in elements.map) {
+		const node = elements.map[nodeId]
+		if (node.isInteractive && node.ref) {
+			const ref = node.ref as HTMLElement
+			// @note 这样太严格，元素是可以跨页面存在的
+			// if (newElementsCache.get(ref) !== currentUrl) {
+			if (!newElementsCache.has(ref)) {
+				newElementsCache.set(ref, currentUrl)
+				node.isNew = true
+			}
+		}
+	}
+
+	return elements
+}
+
+const globRegexCache = new Map<string, RegExp>()
+
+function globToRegex(pattern: string): RegExp {
+	let regex = globRegexCache.get(pattern)
+	if (!regex) {
+		const escaped = pattern.replace(/[.+^${}()|[\]\\]/g, '\\$&')
+		regex = new RegExp(`^${escaped.replace(/\*/g, '.*')}$`)
+		globRegexCache.set(pattern, regex)
+	}
+	return regex
+}
+
+function matchAttributes(
+	attrs: Record<string, string>,
+	patterns: string[]
+): Record<string, string> {
+	const result: Record<string, string> = {}
+
+	for (const pattern of patterns) {
+		if (pattern.includes('*')) {
+			const regex = globToRegex(pattern)
+			for (const key of Object.keys(attrs)) {
+				if (regex.test(key) && attrs[key].trim()) {
+					result[key] = attrs[key].trim()
+				}
+			}
+		} else {
+			const value = attrs[pattern]
+			if (value && value.trim()) {
+				result[pattern] = value.trim()
+			}
+		}
+	}
+
+	return result
 }
 
 /**
- * 构建属性字符串：过滤 + 去重 + 截断
- * Build attribute string: filter + deduplicate + truncate
+ * elementsToString 内部使用的类型
  */
-function buildAttributeString(node: InteractiveElementDomNode): string {
-  const parts: string[] = []
-  const seenValues = new Set<string>()
-  const displayLabel = pickLabel(node)
-
-  for (const [key, value] of Object.entries(node.attributes)) {
-    // role 与 tagName 相同时跳过 / Skip role if same as tagName
-    if (key === 'role' && value === node.tagName) continue
-
-    // 文本去重：aria-label / placeholder / title 与 text 相同时从属性中删除
-    // Text dedup: remove aria-label / placeholder / title from attrs if same as text
-    if (
-      (key === 'aria-label' || key === 'placeholder' || key === 'title' || key === 'value') &&
-      value === displayLabel
-    ) continue
-
-    // 属性值去重：同一节点内值相同（>5 字符）时删后出现的
-    // Value dedup within same node: skip duplicate values (>5 chars)
-    if (value.length > 5 && seenValues.has(value)) continue
-    if (value.length > 5) seenValues.add(value)
-
-    // 截断超长属性值 / Truncate long attribute values
-    const truncated = value.length > 20 ? value.slice(0, 20) + '...' : value
-    parts.push(`${key}=${truncated}`)
-  }
-
-  return parts.length > 0 ? ' ' + parts.join(' ') : ''
+interface TreeNode {
+	type: 'text' | 'element'
+	parent: TreeNode | null
+	children: TreeNode[]
+	isVisible: boolean
+	// Text node properties
+	text?: string
+	// Element node properties
+	tagName?: string
+	attributes?: Record<string, string>
+	isInteractive?: boolean
+	isTopElement?: boolean
+	isNew?: boolean
+	highlightIndex?: number
+	extra?: Record<string, any>
 }
 
 /**
- * 选择显示文本：text > ariaLabel > placeholder
- * Pick display label: text > ariaLabel > placeholder
- */
-function pickLabel(node: InteractiveElementDomNode): string {
-  return node.text || node.value || node.ariaLabel || node.placeholder || ''
-}
-
-/**
- * 将扁平树转换为层级化简化字符串，供 LLM 消费。
- * 使用 tab 缩进表示层级关系，自闭合格式减少 token。
+ * 对应 python 中的 views::clickable_elements_to_string,
+ * 将 dom 信息处理成适合 llm 阅读的文本格式
+ * @形如
+ * ``` text
+ * [0]<a aria-label=page-agent.js 首页 />
+ * [1]<div >P />
+ * [2]<div >page-agent.js
+ * UI Agent in your webpage />
+ * [3]<a >文档 />
+ * [4]<a aria-label=查看源码（在新窗口打开）>源码 />
+ * UI Agent in your webpage
+ * 用户输入需求，AI 理解页面并自动操作。
+ * [5]<a role=button>快速开始 />
+ * [6]<a role=button>查看文档 />
+ * 无需后端
+ * ```
+ * 其中可交互元素用序号标出，提示llm可以用序号操作。
+ * 缩进代表父子关系。
+ * 普通文本则直接列出来。
  *
- * Convert flat tree to hierarchical simplified string for LLM consumption.
- * Uses tab indentation for hierarchy, self-closing format to reduce tokens.
+ * @todo 数据脱敏过滤器
  */
-export function flatTreeToString(nodes: FlatDomNode[]): string {
-  const visibleNodes = nodes.filter((n) => n.isVisible)
-  if (visibleNodes.length === 0) return ''
+export function flatTreeToString(
+	flatTree: FlatDomTree,
+	includeAttributes: string[] = [],
+	keepSemanticTags = false
+): string {
+	const DEFAULT_INCLUDE_ATTRIBUTES = [
+		'title',
+		'type',
+		'checked',
+		'name',
+		'role',
+		'value',
+		'placeholder',
+		'data-date-format',
+		'alt',
+		'aria-label',
+		'aria-expanded',
+		'data-state',
+		'aria-checked',
 
-  // 计算最小深度作为基准 / Calculate min depth as baseline
-  const minDepth = Math.min(...visibleNodes.map((n) => n.depth ?? 0))
+		// @edit added for better form handling
+		'id',
+		'for',
 
-  return visibleNodes
-    .map((node) => {
-      // 计算相对缩进，上限 5 级 / Calculate relative indent, capped at 5
-      const relativeDepth = Math.min((node.depth ?? 0) - minDepth, 5)
-      const indent = '\t'.repeat(relativeDepth)
+		// for jump check
+		'target',
 
-      if (node.type === 'interactive') {
-        const attrs = buildAttributeString(node)
-        const label = pickLabel(node)
-        return `${indent}[${node.index}]<${node.tagName}${attrs}>${label} />`
-      }
+		// absolute position dropdown menu
+		'aria-haspopup',
+		'aria-controls',
+		'aria-owns',
 
-      // 文本节点：直接输出缩进 + 文本 / Text node: output indent + text
-      return `${indent}${node.text}`
-    })
-    .join('\n')
+		// content editable
+		'contenteditable',
+	]
+
+	const includeAttrs = [...includeAttributes, ...DEFAULT_INCLUDE_ATTRIBUTES]
+
+	// Helper function to cap text length
+	const capTextLength = (text: string, maxLength: number): string => {
+		if (text.length > maxLength) {
+			return text.substring(0, maxLength) + '...'
+		}
+		return text
+	}
+
+	// Build tree structure from flat map
+	const buildTreeNode = (nodeId: string): TreeNode | null => {
+		const node = flatTree.map[nodeId]
+		if (!node) return null
+
+		if (node.type === 'TEXT_NODE') {
+			const textNode = node as TextDomNode
+			return {
+				type: 'text',
+				text: textNode.text,
+				isVisible: textNode.isVisible,
+				parent: null,
+				children: [],
+			}
+		} else {
+			const elementNode = node as ElementDomNode
+			const children: TreeNode[] = []
+
+			if (elementNode.children) {
+				for (const childId of elementNode.children) {
+					const child = buildTreeNode(childId)
+					if (child) {
+						child.parent = null // Will be set later
+						children.push(child)
+					}
+				}
+			}
+
+			return {
+				type: 'element',
+				tagName: elementNode.tagName,
+				attributes: elementNode.attributes ?? {},
+				isVisible: elementNode.isVisible ?? false,
+				isInteractive: elementNode.isInteractive ?? false,
+				isTopElement: elementNode.isTopElement ?? false,
+				isNew: elementNode.isNew ?? false,
+				highlightIndex: elementNode.highlightIndex,
+				parent: null,
+				children,
+				extra: elementNode.extra ?? {},
+			}
+		}
+	}
+
+	// Set parent references
+	const setParentReferences = (node: TreeNode, parent: TreeNode | null = null) => {
+		node.parent = parent
+		for (const child of node.children) {
+			setParentReferences(child, node)
+		}
+	}
+
+	// Build root node
+	const rootNode = buildTreeNode(flatTree.rootId)
+	if (!rootNode) return ''
+
+	setParentReferences(rootNode)
+
+	// Helper to check if text node has parent with highlight index
+	const hasParentWithHighlightIndex = (node: TreeNode): boolean => {
+		let current = node.parent
+		while (current) {
+			if (current.type === 'element' && current.highlightIndex !== undefined) {
+				return true
+			}
+			current = current.parent
+		}
+		return false
+	}
+
+	// Helper to check if parent is top element
+	// const isParentTopElement = (node: TreeNode): boolean => {
+	// 	return node.parent?.type === 'element' && node.parent.isTopElement === true
+	// }
+
+	// Main processing function
+	const processNode = (node: TreeNode, depth: number, result: string[]): void => {
+		let nextDepth = depth
+		const depthStr = '\t'.repeat(depth)
+
+		if (node.type === 'element') {
+			const isSemantic = keepSemanticTags && node.tagName && SEMANTIC_TAGS.has(node.tagName)
+
+			// Add element with highlight_index
+			if (node.highlightIndex !== undefined) {
+				nextDepth += 1
+
+				const text = getAllTextTillNextClickableElement(node)
+				let attributesHtmlStr = ''
+
+				if (includeAttrs.length > 0 && node.attributes) {
+					const attributesToInclude = matchAttributes(node.attributes, includeAttrs)
+
+					// Remove duplicate values (for attributes longer than 5 chars)
+					const keys = Object.keys(attributesToInclude)
+					if (keys.length > 1) {
+						const keysToRemove = new Set<string>()
+						const seenValues: Record<string, string> = {}
+
+						for (const key of keys) {
+							const value = attributesToInclude[key]
+							if (value.length > 5) {
+								if (value in seenValues) {
+									keysToRemove.add(key)
+								} else {
+									seenValues[value] = key
+								}
+							}
+						}
+
+						for (const key of keysToRemove) {
+							delete attributesToInclude[key]
+						}
+					}
+
+					// Remove role if it matches tagName
+					if (attributesToInclude.role === node.tagName) {
+						delete attributesToInclude.role
+					}
+
+					// Remove attributes that duplicate text content
+					const attrsToRemoveIfTextMatches = ['aria-label', 'placeholder', 'title']
+					for (const attr of attrsToRemoveIfTextMatches) {
+						if (
+							attributesToInclude[attr] &&
+							attributesToInclude[attr].toLowerCase().trim() === text.toLowerCase().trim()
+						) {
+							delete attributesToInclude[attr]
+						}
+					}
+
+					if (Object.keys(attributesToInclude).length > 0) {
+						attributesHtmlStr = Object.entries(attributesToInclude)
+							.map(([key, value]) => `${key}=${capTextLength(value, 20)}`)
+							.join(' ')
+					}
+				}
+
+				// Build the line
+				const highlightIndicator = node.isNew
+					? `*[${node.highlightIndex}]`
+					: `[${node.highlightIndex}]`
+				let line = `${depthStr}${highlightIndicator}<${node.tagName ?? ''}`
+
+				if (attributesHtmlStr) {
+					line += ` ${attributesHtmlStr}`
+				}
+
+				/**
+				 * @edit scrollable 数据
+				 */
+				if (node.extra) {
+					if (node.extra.scrollable) {
+						let scrollDataText = ''
+						if (node.extra.scrollData?.left)
+							scrollDataText += `left=${node.extra.scrollData.left}, `
+						if (node.extra.scrollData?.top) scrollDataText += `top=${node.extra.scrollData.top}, `
+						if (node.extra.scrollData?.right)
+							scrollDataText += `right=${node.extra.scrollData.right}, `
+						if (node.extra.scrollData?.bottom)
+							scrollDataText += `bottom=${node.extra.scrollData.bottom}`
+
+						line += ` data-scrollable="${scrollDataText}"`
+					}
+				}
+
+				if (text) {
+					const trimmedText = text.trim()
+					if (!attributesHtmlStr) {
+						line += ' '
+					}
+					line += `>${trimmedText}`
+				} else if (!attributesHtmlStr) {
+					line += ' '
+				}
+
+				line += ' />'
+				result.push(line)
+			}
+
+			// special treatment for semantic tags
+			// even if they are not interactive, we can keep them for clear context
+
+			const emitSemantic = isSemantic && node.highlightIndex === undefined
+			// to check if this tag is empty
+			const mark = emitSemantic ? result.length : -1
+
+			if (emitSemantic) {
+				result.push(`${depthStr}<${node.tagName}>`)
+				nextDepth += 1
+			}
+
+			for (const child of node.children) {
+				processNode(child, nextDepth, result)
+			}
+
+			if (emitSemantic) {
+				// empty tag should be removed
+				if (result.length === mark + 1) {
+					result.pop()
+				} else {
+					result.push(`${depthStr}</${node.tagName}>`)
+				}
+			}
+		} else if (node.type === 'text') {
+			// Add text only if it doesn't have a highlighted parent
+			if (hasParentWithHighlightIndex(node)) {
+				return
+			}
+
+			if (
+				node.parent &&
+				node.parent.type === 'element' &&
+				node.parent.isVisible &&
+				node.parent.isTopElement
+			) {
+				result.push(`${depthStr}${node.text ?? ''}`)
+			}
+		}
+	}
+
+	const result: string[] = []
+	processNode(rootNode, 0, result)
+	return result.join('\n')
 }
 
-/**
- * 创建元素索引到实际 DOM 元素的映射表。
- * Create a map from element index to actual DOM element.
- */
-export function getSelectorMap(
-  root: Element = document.body,
-  nodes: FlatDomNode[],
-  config: DomExtractionConfig = {},
-): Map<number, Element> {
-  const map = new Map<number, Element>()
-  const { excludeSelector } = config
-  // 过滤出交互节点 / Filter interactive nodes only
-  const interactiveNodes = nodes.filter(
-    (n): n is InteractiveElementDomNode => n.type === 'interactive',
-  )
+// Get all text until next clickable element
+export const getAllTextTillNextClickableElement = (node: TreeNode, maxDepth = -1): string => {
+	const textParts: string[] = []
 
-  // 遍历所有元素，按顺序匹配交互节点 / Iterate all elements, match interactive nodes in order
-  const allElements = root.querySelectorAll('*')
-  let nodeIdx = 0
+	const collectText = (currentNode: TreeNode, currentDepth: number) => {
+		if (maxDepth !== -1 && currentDepth > maxDepth) {
+			return
+		}
 
-  for (const el of allElements) {
-    if (nodeIdx >= interactiveNodes.length) break
-    // 跳过排除的元素 / Skip excluded elements
-    if (excludeSelector && el.closest(excludeSelector)) continue
-    if (isInteractive(el)) {
-      map.set(interactiveNodes[nodeIdx].index, el)
-      nodeIdx++
-    }
-  }
+		// Skip this branch if we hit a highlighted element (except for the current node)
+		if (
+			currentNode.type === 'element' &&
+			currentNode !== node &&
+			currentNode.highlightIndex !== undefined
+		) {
+			return
+		}
 
-  return map
+		if (currentNode.type === 'text' && currentNode.text) {
+			textParts.push(currentNode.text)
+		} else if (currentNode.type === 'element') {
+			for (const child of currentNode.children) {
+				collectText(child, currentDepth + 1)
+			}
+		}
+	}
+
+	collectText(node, 0)
+	return textParts.join('\n').trim()
 }
 
-/**
- * 检查元素是否是交互元素（可点击、可编辑等）
- * Check if an element is interactive (clickable, editable, etc.)
- */
-function isInteractive(element: Element): boolean {
-  // 检查标签名 / Check tag name
-  const tag = element.tagName.toLowerCase()
-  const interactiveTags = ['a', 'button', 'input', 'select', 'textarea']
-  if (interactiveTags.includes(tag)) return true
+export function getSelectorMap(flatTree: FlatDomTree): Map<number, InteractiveElementDomNode> {
+	const selectorMap = new Map<number, InteractiveElementDomNode>()
 
-  // 检查 ARIA 角色 / Check ARIA role
-  const role = element.getAttribute('role')
-  const interactiveRoles = ['button', 'link', 'textbox', 'checkbox', 'radio', 'tab', 'menuitem', 'option']
-  if (role && interactiveRoles.includes(role)) return true
+	const keys = Object.keys(flatTree.map)
+	for (const key of keys) {
+		const node = flatTree.map[key]
+		if (node.isInteractive && typeof node.highlightIndex === 'number') {
+			selectorMap.set(node.highlightIndex, node as InteractiveElementDomNode)
+		}
+	}
 
-  // 检查 onclick 属性或 tabindex / Check onclick attribute or tabindex
-  if (element.getAttribute('onclick') || element.getAttribute('tabindex')) return true
-
-  // 检查 <li> 是否在下拉列表容器内（Element Plus / Element UI 系列组件）
-  // Check if <li> is inside a dropdown container (Element Plus / Element UI variants: el-*, eu-*)
-  if (tag === 'li') {
-    const dropdownParent = element.closest(
-      '[class*="select-dropdown"], [class*="select__popper"], [class*="dropdown-menu"], [role="listbox"]'
-    )
-    if (dropdownParent) return true
-  }
-
-  return false
+	return selectorMap
 }
 
-/**
- * 提取用于标识元素的相关属性（对齐 page-agent，去掉 class）
- * Extract relevant attributes for identification (aligned with page-agent, no class)
- */
-function getRelevantAttributes(element: Element): Record<string, string> {
-  const attrs: Record<string, string> = {}
-  for (const name of RELEVANT_ATTRIBUTES) {
-    let value = element.getAttribute(name)
+export function getElementTextMap(simplifiedHTML: string) {
+	const lines = simplifiedHTML
+		.split('\n')
+		.map((line) => line.trim())
+		.filter((line) => line.length > 0)
+	const elementTextMap = new Map<number, string>()
+	for (const line of lines) {
+		const regex = /^\[(\d+)\]<[^>]+>([^<]*)/
+		const match = regex.exec(line)
+		if (match) {
+			const index = parseInt(match[1], 10)
+			elementTextMap.set(index, line)
+		}
+	}
 
-    if (
-      name === 'value' &&
-      (
-        element instanceof HTMLInputElement ||
-        element instanceof HTMLTextAreaElement ||
-        element instanceof HTMLSelectElement
-      )
-    ) {
-      value = element.value || null
-    }
+	return elementTextMap
+}
 
-    if (
-      name === 'checked' &&
-      element instanceof HTMLInputElement &&
-      (element.type === 'checkbox' || element.type === 'radio')
-    ) {
-      value = element.checked ? 'true' : null
-    }
+export function cleanUpHighlights() {
+	const cleanupFunctions = (window as any)._highlightCleanupFunctions || []
+	for (const cleanup of cleanupFunctions) {
+		if (typeof cleanup === 'function') {
+			cleanup()
+		}
+	}
 
-    if (name === 'aria-checked' && element instanceof HTMLInputElement) {
-      value = element.checked ? 'true' : value
-    }
+	;(window as any)._highlightCleanupFunctions = []
+}
 
-    if (value) attrs[name] = value
-  }
-  return attrs
+// 监听 URL 的任何变化，立刻清空 highLights
+window.addEventListener('popstate', () => {
+	// console.log('URL changed (popstate), highlights cleaned up.')
+	cleanUpHighlights()
+})
+window.addEventListener('hashchange', () => {
+	// console.log('URL changed (hashchange), highlights cleaned up.')
+	cleanUpHighlights()
+})
+window.addEventListener('beforeunload', () => {
+	// console.log('Page is unloading, highlights cleaned up.')
+	cleanUpHighlights()
+})
+
+const navigation = (window as any).navigation
+if (navigation && typeof navigation.addEventListener === 'function') {
+	navigation.addEventListener('navigate', () => {
+		// console.log('Navigation event detected, highlights cleaned up.')
+		cleanUpHighlights()
+	})
+} else {
+	// 定时器
+	let currentUrl = window.location.href
+	setInterval(() => {
+		if (window.location.href !== currentUrl) {
+			currentUrl = window.location.href
+			// console.log('URL changed (interval), highlights cleaned up.')
+			cleanUpHighlights()
+		}
+	}, 500)
 }

@@ -1,478 +1,506 @@
 /**
- * PageController — 管理 DOM 状态提取和元素交互（对齐 page-agent）
- * PageController — Manages DOM state extraction and element interactions (aligned with page-agent)
+ * Copyright (C) 2025 Alibaba Group Holding Limited
+ * All rights reserved.
  *
- * 设计为独立于 LLM，所有公开方法均为 async 以支持远程调用。
- * Designed to be independent of LLM. All public methods are async for potential remote calling support.
+ * PageController - Manages DOM operations and element interactions.
+ * Designed to be independent of LLM and can be tested in unit tests.
+ * All public methods are async for potential remote calling support.
+ */
+import type { AgentAction, ActionResult as SharedActionResult, BatchResult, BrowserState } from '@paget/shared'
+import {
+	clickElement,
+	executeAction as executeActionFn,
+	executeBatch as executeBatchFn,
+	getElementByIndex,
+	inputTextElement,
+	scrollHorizontally,
+	scrollVertically,
+	selectOptionElement,
+} from './actions'
+import * as dom from './dom'
+import type { FlatDomTree, InteractiveElementDomNode } from './dom/dom_tree/type'
+import { getPageInfo } from './dom/getPageInfo'
+import { patchReact } from './patches/react'
+import { isAnchorElement } from './utils'
+
+/**
+ * Configuration for PageController
+ */
+export interface PageControllerConfig extends dom.DomConfig {
+	/** Enable visual mask overlay during operations (default: false) */
+	enableMask?: boolean
+}
+
+// BrowserState 从 @paget/shared 导入 / BrowserState imported from @paget/shared
+export type { BrowserState } from '@paget/shared'
+
+interface ActionResult {
+	success: boolean
+	message: string
+}
+
+/**
+ * PageController manages DOM state and element interactions.
+ * It provides async methods for all DOM operations, keeping state isolated.
  *
  * @lifecycle
- * - beforeUpdate: DOM 树更新前触发 / Emitted before DOM tree update
- * - afterUpdate: DOM 树更新后触发 / Emitted after DOM tree update
- */
-import type { AgentAction, ActionResult, BatchResult } from '@paget/shared'
-import { getFlatTree, flatTreeToString, getSelectorMap } from './dom'
-import type { FlatDomNode, DomExtractionConfig } from './dom'
-import { getPageInfo } from './dom/getPageInfo'
-import { executeAction, executeBatch } from './actions'
-import { SimulatorMask } from './mask/SimulatorMask'
-
-/**
- * 浏览器状态快照，供 LLM 消费
- * Structured browser state for LLM consumption
- */
-export interface BrowserState {
-  url: string
-  title: string
-  /** 页面信息 + 滚动位置提示 / Page info + scroll position hints */
-  header: string
-  /** 交互元素的简化 HTML / Simplified HTML of interactive elements */
-  content: string
-  /** 视口下方内容指示器 / Content below viewport indicator */
-  footer: string
-}
-
-/**
- * PageController 配置
- * PageController configuration
- */
-export interface PageControllerConfig {
-  /** 要观察的根元素（默认：document.body）/ Root element to observe (default: document.body) */
-  root?: Element
-  /** DOM 提取设置 / DOM extraction settings */
-  domConfig?: DomExtractionConfig
-  /** 是否启用遮罩层（默认：false）/ Whether to enable visual mask (default: false) */
-  enableMask?: boolean
-}
-
-/**
- * PageController 管理 DOM 状态提取和元素交互。
- * PageController manages DOM state extraction and element interactions.
- *
- * 继承 EventTarget 以支持自定义事件（beforeUpdate / afterUpdate）
- * Extends EventTarget for custom events (beforeUpdate / afterUpdate)
+ * - beforeUpdate: Emitted before the DOM tree is updated.
+ * - afterUpdate: Emitted after the DOM tree is updated.
  */
 export class PageController extends EventTarget {
-  private root: Element
-  private domConfig: DomExtractionConfig
-
-  // DOM 的扁平树表示 / Flat tree representation of the DOM
-  private flatTree: FlatDomNode[] = []
-
-  // 元素索引到 DOM 元素的映射 / Map from element index to DOM element
-  private selectorMap = new Map<number, Element>()
-
-  // 索引到元素文本描述的映射 / Map from index to element text description
-  private elementTextMap = new Map<number, string>()
-
-  // 供 LLM 使用的简化 HTML 字符串 / Simplified HTML string for LLM consumption
-  private simplifiedHTML = '<EMPTY>'
-
-  // 上次 DOM 树更新时间戳 / Last DOM tree update timestamp
-  private lastTimeUpdate = 0
-
-  // DOM 树是否已完成首次索引（操作前必须先索引）/ Whether tree has been indexed (required before actions)
-  private isIndexed = false
-
-  // 模拟器遮罩层 / Simulator mask
-  private mask: SimulatorMask | null = null
-  private enableMask: boolean
-
-  /**
-   * 默认排除选择器：跳过 Paget 自身注入的 UI 元素和遮罩层
-   * Default exclude selector: skip Paget's own injected UI elements and mask
-   */
-  private static readonly DEFAULT_EXCLUDE = '[data-paget-ignore], #paget-root'
-
-  constructor(config: PageControllerConfig = {}) {
-    super()
-
-    this.root = config.root || document.body
-    this.domConfig = {
-      ...config.domConfig,
-      excludeSelector: config.domConfig?.excludeSelector
-        ?? PageController.DEFAULT_EXCLUDE,
-    }
-    this.enableMask = config.enableMask ?? false
-
-    if (this.enableMask) this.initMask()
-  }
-
-  /**
-   * 初始化遮罩层 / Initialize the mask
-   */
-  private initMask(): void {
-    if (this.mask) return
-    this.mask = new SimulatorMask()
-  }
-
-  /**
-   * 动态设置是否启用遮罩层 / Dynamically enable or disable mask support
-   */
-  setMaskEnabled(enabled: boolean): void {
-    this.enableMask = enabled
-    if (enabled) {
-      this.initMask()
-      return
-    }
-    this.mask?.hide()
-  }
-
-  // ======= 状态查询 / State Queries =======
-
-  /**
-   * 获取上次 DOM 树更新时间戳
-   * Get last DOM tree update timestamp
-   */
-  async getLastUpdateTime(): Promise<number> {
-    return this.lastTimeUpdate
-  }
-
-  /**
-   * 获取当前浏览器状态供 LLM 上下文使用。
-   * 自动调用 updateTree() 刷新 DOM 状态。
-   *
-   * Get structured browser state for LLM consumption.
-   * Automatically calls updateTree() to refresh DOM state.
-   */
-  async getBrowserState(): Promise<BrowserState> {
-    const url = window.location.href
-    const title = document.title
-    const pi = getPageInfo()
-
-    await this.updateTree()
-
-    const content = this.simplifiedHTML
-
-    // 构建头部信息 / Build header info
-    const titleLine = `Current Page: [${title}](${url})`
-    const pageInfoLine = `Page info: ${pi.viewport_width}x${pi.viewport_height}px viewport, ${pi.page_width}x${pi.page_height}px total page size, ${pi.pages_above.toFixed(1)} pages above, ${pi.pages_below.toFixed(1)} pages below, ${pi.total_pages.toFixed(1)} total pages, at ${(pi.current_page_position * 100).toFixed(0)}% of page`
-
-    const elementsLabel = 'Interactive elements from top layer of the current page inside the viewport:'
-
-    const hasContentAbove = pi.pixels_above > 4
-    const scrollHintAbove = hasContentAbove
-      ? `... ${pi.pixels_above} pixels above (${pi.pages_above.toFixed(1)} pages) - scroll to see more ...`
-      : '[Start of page]'
-
-    const header = `${titleLine}\n${pageInfoLine}\n\n${elementsLabel}\n\n${scrollHintAbove}`
-
-    // 构建底部信息 / Build footer info
-    const hasContentBelow = pi.pixels_below > 4
-    const footer = hasContentBelow
-      ? `... ${pi.pixels_below} pixels below (${pi.pages_below.toFixed(1)} pages) - scroll to see more ...`
-      : '[End of page]'
-
-    return { url, title, header, content, footer }
-  }
-
-  // ======= DOM 树操作 / DOM Tree Operations =======
-
-  /**
-   * 更新 DOM 树，返回简化 HTML。
-   * 如果启用了遮罩层，在提取期间暂时关闭其 pointerEvents。
-   *
-   * Update DOM tree, returns simplified HTML.
-   * If mask is enabled, temporarily disables its pointerEvents during extraction.
-   */
-  async updateTree(): Promise<string> {
-    this.dispatchEvent(new Event('beforeUpdate'))
-
-    this.lastTimeUpdate = Date.now()
-
-    // 暂时绕过遮罩层以允许 DOM 提取 / Temporarily bypass mask for DOM extraction
-    if (this.mask?.isVisible) {
-      this.mask.setPointerEvents(false)
-    }
-
-    this.flatTree = getFlatTree(this.root, this.domConfig)
-    this.simplifiedHTML = flatTreeToString(this.flatTree)
-    this.selectorMap = getSelectorMap(this.root, this.flatTree, this.domConfig)
-
-    // 构建元素文本映射 / Build element text map
-    this.elementTextMap.clear()
-    const lines = this.simplifiedHTML.split('\n')
-    for (const line of lines) {
-      const match = line.match(/\[(\d+)\]/)
-      if (match) {
-        this.elementTextMap.set(Number(match[1]), line)
-      }
-    }
-
-    // 标记为已索引 — 现在可以执行操作了 / Mark as indexed — actions are now allowed
-    this.isIndexed = true
-
-    // 恢复遮罩层阻塞 / Restore mask blocking
-    if (this.mask?.isVisible) {
-      this.mask.setPointerEvents(true)
-    }
-
-    this.dispatchEvent(new Event('afterUpdate'))
-
-    return this.simplifiedHTML
-  }
-
-  // ======= 操作执行 / Element Actions =======
-
-  /**
-   * 确保 DOM 树已索引。未索引时抛出异常。
-   * Ensure DOM tree has been indexed. Throws if updateTree() hasn't been called.
-   */
-  private assertIndexed(): void {
-    if (!this.isIndexed) {
-      throw new Error('DOM tree not indexed yet. Call updateTree() or getBrowserState() first.')
-    }
-  }
-
-  /**
-   * 通过索引点击元素
-   * Click element by index
-   */
-  async clickElement(index: number): Promise<ActionResult> {
-    try {
-      this.assertIndexed()
-      const el = this.getElementByIndex(index)
-      const elemText = this.elementTextMap.get(index)
-
-      const { clickElement: doClick } = await import('./actions')
-      await doClick(el)
-
-      // 处理新标签页链接 / Handle links that open in new tabs
-      if (el instanceof HTMLAnchorElement && el.target === '_blank') {
-        return { action: { tool: 'click', params: { index } }, success: true, output: `Clicked element (${elemText ?? index}). Link opened in a new tab.` }
-      }
-      return { action: { tool: 'click', params: { index } }, success: true, output: `Clicked element (${elemText ?? index}).` }
-    } catch (error) {
-      return { action: { tool: 'click', params: { index } }, success: false, error: `Failed to click element: ${error}` }
-    }
-  }
-
-  /**
-   * 通过索引向元素输入文本
-   * Input text into element by index
-   */
-  async inputText(index: number, text: string): Promise<ActionResult> {
-    try {
-      this.assertIndexed()
-      const el = this.getElementByIndex(index)
-      const elemText = this.elementTextMap.get(index)
-
-      const { inputText: doInput } = await import('./actions')
-      await doInput(el, text)
-
-      return { action: { tool: 'input', params: { index, text } }, success: true, output: `Input text (${text}) into element (${elemText ?? index}).` }
-    } catch (error) {
-      return { action: { tool: 'input', params: { index, text } }, success: false, error: `Failed to input text: ${error}` }
-    }
-  }
-
-  /**
-   * 通过索引选择下拉选项
-   * Select dropdown option by index
-   */
-  async selectOption(index: number, optionText: string): Promise<ActionResult> {
-    try {
-      this.assertIndexed()
-      const el = this.getElementByIndex(index)
-      const elemText = this.elementTextMap.get(index)
-
-      const { selectOption: doSelect } = await import('./actions')
-      await doSelect(el as HTMLSelectElement, optionText)
-
-      return { action: { tool: 'select', params: { index, optionText } }, success: true, output: `Selected option (${optionText}) in element (${elemText ?? index}).` }
-    } catch (error) {
-      return { action: { tool: 'select', params: { index, optionText } }, success: false, error: `Failed to select option: ${error}` }
-    }
-  }
-
-  /**
-   * 垂直滚动
-   * Scroll vertically
-   */
-  async scroll(options: {
-    down: boolean
-    numPages?: number
-    pixels?: number
-    index?: number
-  }): Promise<ActionResult> {
-    try {
-      this.assertIndexed()
-
-      const { down, numPages, pixels, index } = options
-      const scrollAmount = pixels ?? (numPages ?? 1) * window.innerHeight
-      const element = index !== undefined ? this.getElementByIndex(index) : null
-
-      const { scrollVertically } = await import('./actions')
-      const message = await scrollVertically(down, down ? scrollAmount : -scrollAmount, element)
-
-      return { action: { tool: 'scroll', params: options }, success: true, output: message }
-    } catch (error) {
-      return { action: { tool: 'scroll', params: options }, success: false, error: `Failed to scroll: ${error}` }
-    }
-  }
-
-  /**
-   * 水平滚动
-   * Scroll horizontally
-   */
-  async scrollHorizontal(options: {
-    right: boolean
-    pixels?: number
-    index?: number
-  }): Promise<ActionResult> {
-    try {
-      this.assertIndexed()
-
-      const { right, pixels, index } = options
-      const scrollAmount = pixels ?? 300
-      const element = index !== undefined ? this.getElementByIndex(index) : null
-
-      const { scrollHorizontally } = await import('./actions')
-      const message = await scrollHorizontally(right, scrollAmount, element)
-
-      return { action: { tool: 'scroll_horizontally', params: options }, success: true, output: message }
-    } catch (error) {
-      return { action: { tool: 'scroll_horizontally', params: options }, success: false, error: `Failed to scroll horizontally: ${error}` }
-    }
-  }
-
-  /**
-   * 执行任意 JavaScript
-   * Execute arbitrary JavaScript on the page
-   */
-  async executeJavascript(script: string): Promise<ActionResult> {
-    try {
-      const asyncFn = eval(`(async () => { ${script} })`)
-      const result = await asyncFn()
-      return { action: { tool: 'execute_javascript', params: { code: script } }, success: true, output: `Executed JavaScript. Result: ${String(result)}` }
-    } catch (error) {
-      return { action: { tool: 'execute_javascript', params: { code: script } }, success: false, error: `Error executing JavaScript: ${error}` }
-    }
-  }
-
-  /**
-   * 执行单个操作（通过 AgentAction 接口）
-   * Execute a single action via AgentAction interface
-   */
-  async executeAction(action: AgentAction): Promise<ActionResult> {
-    this.assertIndexed()
-
-    // 如果启用遮罩层则显示并高亮目标元素 / Show mask and highlight target element if enabled
-    if (this.enableMask && this.mask) {
-      this.mask.show()
-      const index = action.params.index as number | undefined
-      if (index !== undefined) {
-        const el = this.selectorMap.get(index)
-        if (el) this.mask.highlightElement(el)
-      }
-    }
-
-    const result = await executeAction(action, this.selectorMap)
-
-    // 清除高亮 / Clear highlight
-    this.mask?.clearHighlight()
-    return result
-  }
-
-  /**
-   * 按顺序执行一批操作（高亮每个正在操作的元素）
-   * Execute a batch of actions sequentially (highlights each element)
-   */
-  async executeBatch(
-    actions: AgentAction[],
-    onProgress?: (index: number, result: ActionResult) => void,
-  ): Promise<BatchResult> {
-    this.assertIndexed()
-
-    // 如果启用遮罩层则显示 / Show mask if enabled
-    if (this.enableMask && this.mask) {
-      this.mask.show()
-      // 高亮第一个操作的目标元素 / Highlight the first action's target element
-      this.highlightActionTarget(actions[0])
-    }
-
-    const result = await executeBatch(actions, this.selectorMap, (i, r) => {
-      // 当前操作完成后，高亮下一个要操作的目标元素 / After current action, highlight next action's target
-      if (this.mask) {
-        const nextAction = actions[i + 1]
-        if (nextAction) {
-          this.highlightActionTarget(nextAction)
-        }
-      }
-      onProgress?.(i, r)
-    })
-
-    // 清除高亮 / Clear highlight
-    this.mask?.clearHighlight()
-    return result
-  }
-
-  /**
-   * 高亮指定操作的目标元素 / Highlight the target element of an action
-   */
-  private highlightActionTarget(action: AgentAction | undefined): void {
-    if (!action || !this.mask) return
-    const idx = action.params.index as number | undefined
-    if (idx !== undefined) {
-      const el = this.selectorMap.get(idx)
-      if (el) this.mask.highlightElement(el)
-    }
-  }
-
-  // ======= 遮罩层操作 / Mask Operations =======
-
-  /**
-   * 显示自动化遮罩层 / Show the automation mask
-   */
-  showMask(): void {
-    if (!this.enableMask) return
-    if (!this.mask) this.initMask()
-    this.mask?.show()
-  }
-
-  /**
-   * 隐藏自动化遮罩层 / Hide the automation mask
-   */
-  hideMask(): void {
-    this.mask?.hide()
-  }
-
-  // ======= 内部工具 / Internal Utilities =======
-
-  /**
-   * 通过索引从映射中获取 HTMLElement
-   * Get HTMLElement by index from the selector map
-   */
-  private getElementByIndex(index: number): HTMLElement {
-    const el = this.selectorMap.get(index)
-    if (!el) throw new Error(`No interactive element found at index ${index}`)
-    if (!(el instanceof HTMLElement)) throw new Error(`Element at index ${index} is not an HTMLElement`)
-    return el
-  }
-
-  /**
-   * 获取当前扁平 DOM 树 / Get the current flat DOM tree
-   */
-  getFlatTree(): FlatDomNode[] {
-    return this.flatTree
-  }
-
-  /**
-   * 获取当前选择器映射表 / Get the current selector map
-   */
-  getSelectorMap(): Map<number, Element> {
-    return this.selectorMap
-  }
-
-  /**
-   * 销毁并清理资源 / Dispose and clean up resources
-   */
-  dispose(): void {
-    this.flatTree = []
-    this.selectorMap.clear()
-    this.elementTextMap.clear()
-    this.simplifiedHTML = '<EMPTY>'
-    this.isIndexed = false
-    this.mask?.hide()
-    this.mask = null
-  }
+	private config: PageControllerConfig
+
+	/** Corresponds to eval_page in browser-use */
+	private flatTree: FlatDomTree | null = null
+
+	/**
+	 * All highlighted index-mapped interactive elements
+	 * Corresponds to DOMState.selector_map in browser-use
+	 */
+	private selectorMap = new Map<number, InteractiveElementDomNode>()
+
+	/** Index -> element text description mapping */
+	private elementTextMap = new Map<number, string>()
+
+	/**
+	 * Simplified HTML for LLM consumption.
+	 * Corresponds to clickable_elements_to_string in browser-use
+	 */
+	private simplifiedHTML = '<EMPTY>'
+
+	/** last time the tree was updated */
+	private lastTimeUpdate = 0
+
+	/** Whether the tree has been indexed at least once */
+	private isIndexed = false
+
+	/** Visual mask overlay for blocking user interaction during automation */
+	private mask: InstanceType<typeof import('./mask/SimulatorMask').SimulatorMask> | null = null
+	private maskReady: Promise<void> | null = null
+
+	constructor(config: PageControllerConfig = {}) {
+		super()
+
+		this.config = config
+
+		patchReact(this)
+
+		if (config.enableMask) this.initMask()
+	}
+
+	/**
+	 * Initialize mask asynchronously (dynamic import to avoid CSS loading in Node)
+	 */
+	initMask() {
+		if (this.maskReady !== null) return
+		this.maskReady = (async () => {
+			const { SimulatorMask } = await import('./mask/SimulatorMask')
+			this.mask = new SimulatorMask()
+		})()
+	}
+	// ======= State Queries =======
+
+	/**
+	 * Get current page URL
+	 */
+	async getCurrentUrl(): Promise<string> {
+		return window.location.href
+	}
+
+	/**
+	 * Get last tree update timestamp
+	 */
+	async getLastUpdateTime(): Promise<number> {
+		return this.lastTimeUpdate
+	}
+
+	/**
+	 * Get structured browser state for LLM consumption.
+	 * Automatically calls updateTree() to refresh the DOM state.
+	 */
+	async getBrowserState(): Promise<BrowserState> {
+		const url = window.location.href
+		const title = document.title
+		const pi = getPageInfo()
+		const viewportExpansion = dom.resolveViewportExpansion(this.config.viewportExpansion)
+
+		await this.updateTree()
+
+		const content = this.simplifiedHTML
+
+		// Build header: page info + scroll position hint
+		const titleLine = `Current Page: [${title}](${url})`
+
+		const pageInfoLine = `Page info: ${pi.viewport_width}x${pi.viewport_height}px viewport, ${pi.page_width}x${pi.page_height}px total page size, ${pi.pages_above.toFixed(1)} pages above, ${pi.pages_below.toFixed(1)} pages below, ${pi.total_pages.toFixed(1)} total pages, at ${(pi.current_page_position * 100).toFixed(0)}% of page`
+
+		const elementsLabel =
+			viewportExpansion === -1
+				? 'Interactive elements from top layer of the current page (full page):'
+				: 'Interactive elements from top layer of the current page inside the viewport:'
+
+		const hasContentAbove = pi.pixels_above > 4
+		const scrollHintAbove =
+			hasContentAbove && viewportExpansion !== -1
+				? `... ${pi.pixels_above} pixels above (${pi.pages_above.toFixed(1)} pages) - scroll to see more ...`
+				: '[Start of page]'
+
+		const header = `${titleLine}\n${pageInfoLine}\n\n${elementsLabel}\n\n${scrollHintAbove}`
+
+		// Build footer: scroll position hint
+		const hasContentBelow = pi.pixels_below > 4
+		const footer =
+			hasContentBelow && viewportExpansion !== -1
+				? `... ${pi.pixels_below} pixels below (${pi.pages_below.toFixed(1)} pages) - scroll to see more ...`
+				: '[End of page]'
+
+		return { url, title, header, content, footer }
+	}
+
+	// ======= DOM Tree Operations =======
+
+	/**
+	 * Update DOM tree, returns simplified HTML for LLM.
+	 * This is the main method to refresh the page state.
+	 * Automatically bypasses mask during DOM extraction if enabled.
+	 */
+	async updateTree(): Promise<string> {
+		this.dispatchEvent(new Event('beforeUpdate'))
+
+		this.lastTimeUpdate = Date.now()
+
+		// Temporarily bypass mask to allow DOM extraction
+		if (this.mask) {
+			this.mask.wrapper.style.pointerEvents = 'none'
+		}
+
+		dom.cleanUpHighlights()
+
+		const blacklist = [
+			...(this.config.interactiveBlacklist || []),
+			...document.querySelectorAll('[data-page-agent-not-interactive]').values(),
+		]
+
+		this.flatTree = dom.getFlatTree({
+			...this.config,
+			interactiveBlacklist: blacklist,
+		})
+
+		this.simplifiedHTML = dom.flatTreeToString(
+			this.flatTree,
+			this.config.includeAttributes,
+			this.config.keepSemanticTags
+		)
+
+		this.selectorMap.clear()
+		this.selectorMap = dom.getSelectorMap(this.flatTree)
+
+		this.elementTextMap.clear()
+		this.elementTextMap = dom.getElementTextMap(this.simplifiedHTML)
+
+		// Mark as indexed - now element actions are allowed
+		this.isIndexed = true
+
+		// Restore mask blocking
+		if (this.mask) {
+			this.mask.wrapper.style.pointerEvents = 'auto'
+		}
+
+		this.dispatchEvent(new Event('afterUpdate'))
+
+		return this.simplifiedHTML
+	}
+
+	/**
+	 * Clean up all element highlights
+	 */
+	async cleanUpHighlights(): Promise<void> {
+		console.log('[PageController] cleanUpHighlights')
+		dom.cleanUpHighlights()
+	}
+
+	// ======= Element Actions =======
+
+	/**
+	 * 是否启用了遮罩 / Whether mask is enabled
+	 */
+	get enableMask(): boolean {
+		return !!this.config.enableMask
+	}
+
+	/**
+	 * 动态设置遮罩开关 / Dynamically toggle mask behavior
+	 */
+	setMaskEnabled(enabled: boolean): void {
+		this.config.enableMask = enabled
+		if (enabled) {
+			this.initMask()
+			return
+		}
+		this.mask?.hide()
+	}
+
+	/**
+	 * 确保 DOM 树已被索引，否则抛出异常。
+	 * Ensure the tree has been indexed before any index-based operation.
+	 * Throws if updateTree() hasn't been called yet.
+	 */
+	private assertIndexed(): void {
+		if (!this.isIndexed) {
+			throw new Error('DOM tree not indexed yet. Call updateTree() or getBrowserState() first.')
+		}
+	}
+
+	/**
+	 * Click element by index
+	 */
+	async clickElement(index: number): Promise<ActionResult> {
+		try {
+			this.assertIndexed()
+			const element = getElementByIndex(this.selectorMap, index)
+			const elemText = this.elementTextMap.get(index)
+			await clickElement(element)
+
+			// Handle links that open in new tabs
+			if (isAnchorElement(element) && element.target === '_blank') {
+				return {
+					success: true,
+					message: `✅ Clicked element (${elemText ?? index}). ⚠️ Link opened in a new tab.`,
+				}
+			}
+
+			return {
+				success: true,
+				message: `✅ Clicked element (${elemText ?? index}).`,
+			}
+		} catch (error) {
+			return {
+				success: false,
+				message: `❌ Failed to click element: ${error}`,
+			}
+		}
+	}
+
+	/**
+	 * Input text into element by index
+	 */
+	async inputText(index: number, text: string): Promise<ActionResult> {
+		try {
+			this.assertIndexed()
+			const element = getElementByIndex(this.selectorMap, index)
+			const elemText = this.elementTextMap.get(index)
+			await inputTextElement(element, text)
+
+			return {
+				success: true,
+				message: `✅ Input text (${text}) into element (${elemText ?? index}).`,
+			}
+		} catch (error) {
+			return {
+				success: false,
+				message: `❌ Failed to input text: ${error}`,
+			}
+		}
+	}
+
+	/**
+	 * Select dropdown option by index and option text
+	 */
+	async selectOption(index: number, optionText: string): Promise<ActionResult> {
+		try {
+			this.assertIndexed()
+			const element = getElementByIndex(this.selectorMap, index)
+			const elemText = this.elementTextMap.get(index)
+			await selectOptionElement(element as HTMLSelectElement, optionText)
+
+			return {
+				success: true,
+				message: `✅ Selected option (${optionText}) in element (${elemText ?? index}).`,
+			}
+		} catch (error) {
+			return {
+				success: false,
+				message: `❌ Failed to select option: ${error}`,
+			}
+		}
+	}
+
+	/**
+	 * Scroll vertically
+	 */
+	async scroll(options: {
+		down: boolean
+		numPages: number
+		pixels?: number
+		index?: number
+	}): Promise<ActionResult> {
+		try {
+			const { down, numPages, pixels, index } = options
+
+			this.assertIndexed()
+
+			const scrollAmount = (pixels ?? numPages * window.innerHeight) * (down ? 1 : -1)
+
+			const element = index !== undefined ? getElementByIndex(this.selectorMap, index) : null
+
+			const message = await scrollVertically(scrollAmount, element)
+
+			return {
+				success: true,
+				message,
+			}
+		} catch (error) {
+			return {
+				success: false,
+				message: `❌ Failed to scroll: ${error}`,
+			}
+		}
+	}
+
+	/**
+	 * Scroll horizontally
+	 */
+	async scrollHorizontally(options: {
+		right: boolean
+		pixels: number
+		index?: number
+	}): Promise<ActionResult> {
+		try {
+			const { right, pixels, index } = options
+
+			this.assertIndexed()
+
+			const scrollAmount = pixels * (right ? 1 : -1)
+
+			const element = index !== undefined ? getElementByIndex(this.selectorMap, index) : null
+
+			const message = await scrollHorizontally(scrollAmount, element)
+
+			return {
+				success: true,
+				message,
+			}
+		} catch (error) {
+			return {
+				success: false,
+				message: `❌ Failed to scroll horizontally: ${error}`,
+			}
+		}
+	}
+
+	/**
+	 * Execute arbitrary JavaScript on the page
+	 */
+	async executeJavascript(script: string): Promise<ActionResult> {
+		try {
+			// Wrap script in async function to support await
+			const asyncFunction = eval(`(async () => { ${script} })`)
+			const result = await asyncFunction()
+			return {
+				success: true,
+				message: `✅ Executed JavaScript. Result: ${result}`,
+			}
+		} catch (error) {
+			return {
+				success: false,
+				message: `❌ Error executing JavaScript: ${error}`,
+			}
+		}
+	}
+
+	// ======= 批量操作方法 / Batch Action Methods =======
+
+	/**
+	 * 执行单个代理操作，支持遮罩高亮。
+	 * Execute a single agent action with optional mask highlighting.
+	 */
+	async executeAction(action: AgentAction): Promise<SharedActionResult> {
+		this.assertIndexed()
+		if (this.enableMask && this.mask) {
+			await this.maskReady
+			this.mask.show()
+			const index = action.params.index as number | undefined
+			if (index !== undefined) {
+				const node = this.selectorMap.get(index)
+				if (node) this.mask.highlightElement(node.ref)
+			}
+		}
+		const result = await executeActionFn(action, this.selectorMap)
+		this.mask?.clearHighlight()
+		return result
+	}
+
+	/**
+	 * 批量执行代理操作，支持进度回调和遮罩高亮。
+	 * Execute a batch of agent actions with progress callback and mask highlighting.
+	 */
+	async executeBatch(actions: AgentAction[], onProgress?: (index: number, result: SharedActionResult) => void): Promise<BatchResult> {
+		this.assertIndexed()
+		if (this.enableMask && this.mask) {
+			await this.maskReady
+			this.mask.show()
+			const firstIndex = actions[0]?.params?.index as number | undefined
+			if (firstIndex !== undefined) {
+				const node = this.selectorMap.get(firstIndex)
+				if (node) this.mask.highlightElement(node.ref)
+			}
+		}
+		const result = await executeBatchFn(actions, this.selectorMap, (i, r) => {
+			if (this.mask) {
+				const nextAction = actions[i + 1]
+				const nextIndex = nextAction?.params?.index as number | undefined
+				if (nextIndex !== undefined) {
+					const nextNode = this.selectorMap.get(nextIndex)
+					if (nextNode) this.mask.highlightElement(nextNode.ref)
+				}
+			}
+			onProgress?.(i, r)
+		})
+		this.mask?.clearHighlight()
+		return result
+	}
+
+	// ======= Mask Operations =======
+
+	/**
+	 * Show the visual mask overlay.
+	 * Only works after mask is setup.
+	 */
+	async showMask(): Promise<void> {
+		await this.maskReady
+		this.mask?.show()
+	}
+
+	/**
+	 * Hide the visual mask overlay.
+	 * Only works after mask is setup.
+	 */
+	async hideMask(): Promise<void> {
+		await this.maskReady
+		this.mask?.hide()
+	}
+
+	/**
+	 * Dispose and clean up resources
+	 */
+	dispose(): void {
+		dom.cleanUpHighlights()
+		this.flatTree = null
+		this.selectorMap.clear()
+		this.elementTextMap.clear()
+		this.simplifiedHTML = '<EMPTY>'
+		this.isIndexed = false
+		this.mask?.dispose()
+		this.mask = null
+	}
 }
+
+// ======= 导出 / Exports =======
+export * from './actions'
+export * from './dom'
+export { getPageInfo } from './dom/getPageInfo'
+export type { FlatDomTree, DomNode, TextDomNode, ElementDomNode, InteractiveElementDomNode } from './dom/dom_tree/type'
+export { SimulatorMask } from './mask/SimulatorMask'
+export * from './patches/vue'
+export * from './patches/element-plus'
+export * from './patches/react'
+export * from './patches/antd'
